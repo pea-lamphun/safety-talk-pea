@@ -10,61 +10,54 @@
   <div id="root"></div>
   
   <script type="module">
-    // Import React และ ReactDOM
     import React from 'https://esm.sh/react@18.2.0'
-    import ReactDOM from 'https://esm.sh/react-dom@18.2.0'
+    import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client'
     import * as LucideReact from 'https://esm.sh/lucide-react@0.263.1'
     
-    // โหลดโค้ดจากไฟล์ jsx
-    const loadApp = async () => {
+    // โหลด JSX แบบ dynamic import
+    const init = async () => {
       try {
-        const response = await fetch('./safety-talk-firebase.jsx')
-        const code = await response.text()
-        
-        // สร้าง module และรันโค้ด
-        const exports = {}
-        const module = { exports }
-        
-        // สร้าง function wrapper
-        const func = new Function(
-          'module', 'exports', 'React', 'useState', 'useEffect', 'useRef',
-          'Camera', 'MapPin', 'Clock', 'Users', 'CheckCircle', 'XCircle', 
-          'Calendar', 'TrendingUp', 'AlertCircle', 'Settings', 'QrCode', 
-          'Download', 'Upload', 'UserPlus', 'Edit2', 'Trash2', 'Search', 
-          'FileText', 'BarChart3', 'Filter',
-          code
-        )
-        
-        // รัน function
-        func(
-          module, exports, React, React.useState, React.useEffect, React.useRef,
-          LucideReact.Camera, LucideReact.MapPin, LucideReact.Clock, 
-          LucideReact.Users, LucideReact.CheckCircle, LucideReact.XCircle,
-          LucideReact.Calendar, LucideReact.TrendingUp, LucideReact.AlertCircle,
-          LucideReact.Settings, LucideReact.QrCode, LucideReact.Download,
-          LucideReact.Upload, LucideReact.UserPlus, LucideReact.Edit2,
-          LucideReact.Trash2, LucideReact.Search, LucideReact.FileText,
-          LucideReact.BarChart3, LucideReact.Filter
-        )
-        
-        // Render แอพ
-        const App = module.exports.default || exports.default
-        ReactDOM.createRoot(document.getElementById('root')).render(
-          React.createElement(App)
-        )
-      } catch (error) {
-        console.error('Error loading app:', error)
-        document.getElementById('root').innerHTML = `
-          <div style="padding: 20px; color: red;">
-            <h2>ไม่สามารถโหลดแอพได้</h2>
-            <p>กรุณาตรวจสอบว่าไฟล์ safety-talk-firebase.jsx อยู่ในโฟลเดอร์เดียวกัน</p>
-            <p>Error: ${error.message}</p>
-          </div>
+        // สร้าง script tag สำหรับ JSX
+        const script = document.createElement('script')
+        script.type = 'module'
+        script.textContent = `
+          import React from 'https://esm.sh/react@18.2.0'
+          import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client'
+          
+          // โหลดโค้ดจากไฟล์
+          const response = await fetch('./safety-talk-firebase.jsx')
+          const code = await response.text()
+          
+          // ประมวลผลและรันโค้ด
+          const blob = new Blob([code], { type: 'text/javascript' })
+          const url = URL.createObjectURL(blob)
+          const module = await import(url)
+          
+          // Render แอพ
+          const root = ReactDOM.createRoot(document.getElementById('root'))
+          root.render(React.createElement(module.default))
         `
+        document.body.appendChild(script)
+      } catch (error) {
+        console.error('Error:', error)
+        document.getElementById('root').innerHTML = \`
+          <div style="padding: 40px; max-width: 600px; margin: 0 auto; font-family: sans-serif;">
+            <h2 style="color: #ef4444; margin-bottom: 16px;">⚠️ ไม่สามารถโหลดระบบได้</h2>
+            <p style="margin-bottom: 12px;">กรุณาตรวจสอบว่าไฟล์ <strong>safety-talk-firebase.jsx</strong> อยู่ในโฟลเดอร์เดียวกัน</p>
+            <p style="color: #666; font-size: 14px;">Error: \${error.message}</p>
+            <hr style="margin: 24px 0; border: none; border-top: 1px solid #ddd;" />
+            <p style="color: #666; font-size: 14px;">
+              <strong>วิธีแก้:</strong><br/>
+              1. กลับไปหน้า Repository<br/>
+              2. ตรวจสอบว่ามีไฟล์ safety-talk-firebase.jsx<br/>
+              3. ถ้าไม่มี → อัพโหลดไฟล์
+            </p>
+          </div>
+        \`
       }
     }
     
-    loadApp()
+    init()
   </script>
 </body>
 </html>
