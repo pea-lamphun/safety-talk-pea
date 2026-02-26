@@ -38,7 +38,7 @@ class FirebaseMock {
     localStorage.setItem('firebase-data', JSON.stringify(this.data));
   }
 
-  async collection(name) {
+  collection(name) {
     return {
       add: async (data) => {
         const id = Date.now().toString();
