@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safety Talk - ระบบลงทะเบียน</title>
+  
+  <!-- React & ReactDOM (Production) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel Standalone -->
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    // Expose React globals
+    window.React = React;
+    window.ReactDOM = ReactDOM;
+    window.useState = React.useState;
+    window.useEffect = React.useEffect;
+    window.useRef = React.useRef;
+    
+    // Expose Lucide icons
+    const icons = window.lucide;
+    window.Camera = icons.Camera;
+    window.MapPin = icons.MapPin;
+    window.Clock = icons.Clock;
+    window.CheckCircle = icons.CheckCircle;
+    window.XCircle = icons.XCircle;
+    window.Download = icons.Download;
+    window.BarChart3 = icons.BarChart3;
+    window.Calendar = icons.Calendar;
+    
+    console.log('%c🚀 Safety Talk System Starting...', 'color:#10b981;font-weight:bold');
+  </script>
+
+  <!-- Load Safety Talk app -->
+  <script type="text/babel" src="./safety-talk-simple.jsx"></script>
+  
+  <script type="text/babel">
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(SafetyTalkApp, null));
+    console.log('%c✅ App Rendered!', 'color:#10b981;font-weight:bold');
+  </script>
+</body>
+</html>
