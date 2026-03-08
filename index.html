@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safety Talk - ระบบลงทะเบียน</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const { useState, useEffect, useRef } = React;
+    const h = React.createElement;
+    
+    // Firebase Mock - LocalStorage
+    class FirebaseMock {
+      constructor() {
+        this.data = { attendances: [], settings: {} };
+        this.loadFromStorage();
+      }
+      loadFromStorage() {
+        try {
+          const stored = localStorage.getItem('safety-talk-data');
+          if (stored) this.data = JSON.parse(stored);
+        } catch (e) {}
+      }
+      saveToStorage() {
+        localStorage.setItem('safety-talk-data', JSON.stringify(this.data));
+      }
+      collection(name) {
+        return {
+          add: async (data) => {
+            const id = Date.now().toString() + Math.random().toString(36);
+            const item = { ...data, id, createdAt: new Date().toISOString() };
+            this.data[name] = this.data[name] || [];
+            this.data[name].push(item);
+            this.saveToStorage();
+            return { id };
+          },
+          get: async () => ({
+            docs: (this.data[name] || []).map(item => ({ id: item.id, data: () => item }))
+          }),
+          doc: (id) => ({
+            set: async (data) => {
+              this.data[name] = this.data[name] || [];
+              const index = this.data[name].findIndex(item => item.id === id);
+              if (index >= 0) this.data[name][index] = { ...data, id };
+              else this.data[name].push({ ...data, id });
+              this.saveToStorage();
+            },
+            get: async () => {
+              const item = (this.data[name] || []).find(item => item.id === id);
+              return { exists: !!item, data: () => item };
+            }
+          })
+        };
+      }
+    }
+    
+    const db = new FirebaseMock();
+    
+    // Locations
+    const LOCATIONS = {
+      lampun: 'กฟจ.ลำพูน',
+      pasang: 'กฟส.ป่าซาง',
+      banhong: 'กฟส.บ้านโฮ่ง',
+      li: 'กฟส.ลี้',
+      banthi: 'กฟส.บ้านธิ',
+      maeta: 'กฟส.แม่ทา',
+      nakornchadee: 'กฟส.นครเจดีย์',
+      wiangnonglong: 'กฟส.เวียงหนองล้อง',
+      thunghuachang: 'กฟส.ทุ่งหัวช้าง',
+      maetuen: 'กฟส.แม่ตื่น'
+    };
+    
+    // Main App
+    function SafetyTalkApp() {
+      const [currentView, setCurrentView] = useState('register');
+      const [currentLocation, setCurrentLocation] = useState('lampun');
+      const [showSuccess, setShowSuccess] = useState(false);
+      const [settings, setSettings] = useState({});
+      
+      useEffect(() => {
+        loadSettings();
+      }, []);
+      
+      const loadSettings = async () => {
+        const result = await db.collection('settings').doc('app').get();
+        if (result.exists) setSettings(result.data());
+      };
+      
+      const handleSuccess = () => {
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+      };
+      
+      const renderNavigation = () => {
+        const navItems = [
+          { id: 'register', label: '📝 ลงทะเบียน' },
+          { id: 'reports', label: '📊 รายงาน' },
+          { id: 'admin', label: '👨‍💼 Admin Dashboard' },
+          { id: 'public', label: '📺 Public Dashboard' },
+          { id: 'settings', label: '⚙️ การตั้งค่า' }
+        ];
+        
+        return h('div', { className: 'flex flex-wrap justify-center gap-2 mb-8' },
+          navItems.map(item =>
+            h('button', {
+              key: item.id,
+              onClick: () => setCurrentView(item.id),
+              className: `px-4 py-2 rounded-lg font-bold text-sm ${
+                currentView === item.id
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`
+            }, item.label)
+          )
+        );
+      };
+      
+      return h('div', { className: 'min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900' },
+        h('div', { className: 'container mx-auto px-4 py-8' },
+          h('div', { className: 'text-center mb-8' },
+            h('h1', { className: 'text-4xl font-black text-emerald-400 mb-2' }, 'Safety Talk'),
+            h('p', { className: 'text-slate-400' }, 'ระบบลงทะเบียนเข้าร่วมกิจกรรม')
+          ),
+          
+          renderNavigation(),
+          
+          showSuccess && h('div', {
+            className: 'fixed top-4 right-4 bg-emerald-500 text-white px-6 py-4 rounded-lg shadow-lg z-50 animate-bounce'
+          },
+            h('div', { className: 'flex items-center space-x-3' },
+              h('span', null, '✅'),
+              h('span', { className: 'font-bold' }, 'ลงทะเบียนสำเร็จ!')
+            )
+          ),
+          
+          h('div', { className: 'max-w-6xl mx-auto' },
+            currentView === 'register' && h(RegistrationForm, { 
+              locationId: currentLocation, 
+              onSuccess: handleSuccess 
+            }),
+            currentView === 'reports' && h(ReportsView, null),
+            currentView === 'admin' && h(AdminDashboard, null),
+            currentView === 'public' && h(PublicDashboard, null),
+            currentView === 'settings' && h(SettingsView, { 
+              onLocationChange: setCurrentLocation 
+            })
+          )
+        )
+      );
+    }
+    
+    // Registration Form - NO PLACEHOLDER, SELF ENTRY
+    function RegistrationForm({ locationId, onSuccess }) {
+      const [formData, setFormData] = useState({
+        employeeCode: '',
+        fullName: '',
+        position: '',
+        department: ''
+      });
+      const [photo, setPhoto] = useState(null);
+      const [gps, setGps] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [cameraActive, setCameraActive] = useState(false);
+      const videoRef = useRef(null);
+      
+      useEffect(() => {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => setGps({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+            (err) => console.log('GPS Error:', err)
+          );
+        }
+      }, []);
+      
+      const startCamera = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.onloadedmetadata = () => {
+              videoRef.current.play();
+              setCameraActive(true);
+            };
+          }
+        } catch (err) {
+          console.error('Camera error:', err);
+          setError('ไม่สามารถเปิดกล้องได้: ' + err.message);
+        }
+      };
+      
+      const takePhoto = () => {
+        if (!videoRef.current) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+        setPhoto(canvas.toDataURL('image/jpeg', 0.7));
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+        setCameraActive(false);
+      };
+      
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!formData.fullName.trim()) {
+          setError('กรุณากรอกชื่อ-นามสกุล');
+          return;
+        }
+        if (!photo) {
+          setError('กรุณาถ่ายรูป');
+          return;
+        }
+        
+        setLoading(true);
+        setError(null);
+        
+        try {
+          await db.collection('attendances').add({
+            employeeCode: formData.employeeCode.trim(),
+            fullName: formData.fullName.trim(),
+            position: formData.position.trim() || '-',
+            department: formData.department.trim() || '-',
+            locationId: locationId,
+            photo: photo,
+            gps: gps,
+            timestamp: new Date().toISOString(),
+            date: new Date().toISOString().split('T')[0]
+          });
+          
+          onSuccess();
+          setFormData({ employeeCode: '', fullName: '', position: '', department: '' });
+          setPhoto(null);
+        } catch (err) {
+          setError('เกิดข้อผิดพลาด กรุณาลองใหม่');
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      const inputClass = 'w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:border-emerald-500 focus:outline-none';
+      
+      return h('form', { onSubmit: handleSubmit, className: 'space-y-6' },
+        h('div', { className: 'bg-slate-800 rounded-xl p-6 space-y-4' },
+          h('h3', { className: 'text-lg font-bold text-emerald-400 mb-4' }, '📝 กรอกข้อมูลของคุณ'),
+          
+          h('div', null,
+            h('label', { className: 'block text-sm font-medium text-slate-300 mb-2' },
+              'รหัสพนักงาน ', h('span', { className: 'text-slate-500' }, '(ถ้ามี)')
+            ),
+            h('input', {
+              type: 'text',
+              value: formData.employeeCode,
+              onChange: (e) => setFormData({...formData, employeeCode: e.target.value}),
+              className: inputClass
+            })
+          ),
+          
+          h('div', null,
+            h('label', { className: 'block text-sm font-medium text-slate-300 mb-2' },
+              'ชื่อ - นามสกุล ', h('span', { className: 'text-red-400' }, '*')
+            ),
+            h('input', {
+              type: 'text',
+              value: formData.fullName,
+              onChange: (e) => setFormData({...formData, fullName: e.target.value}),
+              className: inputClass,
+              required: true
+            })
+          ),
+          
+          h('div', null,
+            h('label', { className: 'block text-sm font-medium text-slate-300 mb-2' }, 'ตำแหน่ง'),
+            h('input', {
+              type: 'text',
+              value: formData.position,
+              onChange: (e) => setFormData({...formData, position: e.target.value}),
+              className: inputClass
+            })
+          ),
+          
+          h('div', null,
+            h('label', { className: 'block text-sm font-medium text-slate-300 mb-2' }, 'สังกัด / แผนก'),
+            h('input', {
+              type: 'text',
+              value: formData.department,
+              onChange: (e) => setFormData({...formData, department: e.target.value}),
+              className: inputClass
+            })
+          )
+        ),
+        
+        h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+          h('h3', { className: 'text-lg font-bold text-emerald-400 mb-4' },
+            '📸 ถ่ายรูปยืนยันตัวตน ', h('span', { className: 'text-red-400' }, '*')
+          ),
+          
+          !photo
+            ? h('div', { className: 'space-y-4' },
+                !cameraActive
+                  ? h('button', {
+                      type: 'button',
+                      onClick: startCamera,
+                      className: 'w-full py-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg'
+                    }, '📷 เปิดกล้อง')
+                  : h('div', { className: 'space-y-4' },
+                      h('video', { 
+                        ref: videoRef, 
+                        autoPlay: true, 
+                        playsInline: true, 
+                        className: 'w-full rounded-lg bg-black'
+                      }),
+                      h('button', {
+                        type: 'button',
+                        onClick: takePhoto,
+                        className: 'w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg'
+                      }, '📸 ถ่ายรูป')
+                    )
+              )
+            : h('div', { className: 'space-y-4' },
+                h('img', { src: photo, alt: 'Photo', className: 'w-full rounded-lg' }),
+                h('button', {
+                  type: 'button',
+                  onClick: () => setPhoto(null),
+                  className: 'w-full py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg'
+                }, 'ถ่ายใหม่')
+              )
+        ),
+        
+        gps && h('div', { className: 'bg-slate-800 rounded-xl p-4 text-sm text-slate-300' },
+          `📍 ตำแหน่ง: ${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}`
+        ),
+        
+        error && h('div', { className: 'bg-red-500/20 border border-red-500 rounded-lg p-4 text-red-400' }, error),
+        
+        h('button', {
+          type: 'submit',
+          disabled: loading,
+          className: 'w-full py-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 text-white font-bold rounded-lg text-lg'
+        }, loading ? 'กำลังบันทึก...' : '✅ ลงทะเบียน')
+      );
+    }
+    
+    // Reports View
+    function ReportsView() {
+      const [attendances, setAttendances] = useState([]);
+      const [filter, setFilter] = useState({
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date().toISOString().split('T')[0]
+      });
+      
+      useEffect(() => { loadData(); }, [filter]);
+      
+      const loadData = async () => {
+        const result = await db.collection('attendances').get();
+        const data = result.docs.map(doc => doc.data());
+        const filtered = data.filter(item => 
+          item.date >= filter.startDate && item.date <= filter.endDate
+        );
+        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setAttendances(filtered);
+      };
+      
+      const exportToExcel = () => {
+        const csv = [
+          ['วันที่', 'เวลา', 'รหัสพนักงาน', 'ชื่อ-นามสกุล', 'ตำแหน่ง', 'สังกัด/แผนก', 'การไฟฟ้า', 'GPS'],
+          ...attendances.map(item => [
+            new Date(item.timestamp).toLocaleDateString('th-TH'),
+            new Date(item.timestamp).toLocaleTimeString('th-TH'),
+            item.employeeCode || '-',
+            item.fullName,
+            item.position,
+            item.department,
+            LOCATIONS[item.locationId] || item.locationId,
+            item.gps ? `${item.gps.latitude},${item.gps.longitude}` : '-'
+          ])
+        ].map(row => row.join(',')).join('\n');
+        
+        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `safety-talk-${filter.startDate}-to-${filter.endDate}.csv`;
+        link.click();
+      };
+      
+      const groupedByDate = attendances.reduce((acc, item) => {
+        if (!acc[item.date]) acc[item.date] = [];
+        acc[item.date].push(item);
+        return acc;
+      }, {});
+      
+      return h('div', { className: 'space-y-6' },
+        h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+          h('h3', { className: 'text-lg font-bold text-emerald-400 mb-4' }, '📅 เลือกช่วงเวลา'),
+          h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4' },
+            h('div', null,
+              h('label', { className: 'block text-sm text-slate-300 mb-2' }, 'จากวันที่'),
+              h('input', {
+                type: 'date',
+                value: filter.startDate,
+                onChange: (e) => setFilter({...filter, startDate: e.target.value}),
+                className: 'w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white'
+              })
+            ),
+            h('div', null,
+              h('label', { className: 'block text-sm text-slate-300 mb-2' }, 'ถึงวันที่'),
+              h('input', {
+                type: 'date',
+                value: filter.endDate,
+                onChange: (e) => setFilter({...filter, endDate: e.target.value}),
+                className: 'w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white'
+              })
+            )
+          )
+        ),
+        
+        h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4' },
+          h('div', { className: 'bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-6 text-white' },
+            h('div', { className: 'text-3xl font-black mb-1' }, attendances.length),
+            h('div', { className: 'text-sm opacity-90' }, 'ลงทะเบียนทั้งหมด')
+          ),
+          h('div', { className: 'bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl p-6 text-white' },
+            h('div', { className: 'text-3xl font-black mb-1' }, Object.keys(groupedByDate).length),
+            h('div', { className: 'text-sm opacity-90' }, 'จำนวนวัน')
+          ),
+          h('div', { className: 'bg-gradient-to-br from-purple-500 to-pink-600 rounded-xl p-6 text-white' },
+            h('div', { className: 'text-3xl font-black mb-1' },
+              attendances.length > 0 ? Math.round(attendances.length / Math.max(Object.keys(groupedByDate).length, 1)) : 0
+            ),
+            h('div', { className: 'text-sm opacity-90' }, 'เฉลี่ยต่อวัน')
+          )
+        ),
+        
+        h('button', {
+          onClick: exportToExcel,
+          className: 'w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg'
+        }, `📥 Export Excel (${attendances.length} รายการ)`),
+        
+        h('div', { className: 'space-y-4' },
+          Object.keys(groupedByDate).sort().reverse().map(date =>
+            h('div', { key: date, className: 'bg-slate-800 rounded-xl p-6' },
+              h('h3', { className: 'text-lg font-bold text-emerald-400 mb-4' },
+                `📅 ${new Date(date + 'T00:00:00').toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })} (${groupedByDate[date].length} คน)`
+              ),
+              h('div', { className: 'space-y-3' },
+                groupedByDate[date].map((item, idx) =>
+                  h('div', { key: idx, className: 'bg-slate-900 rounded-lg p-4 flex items-start space-x-4' },
+                    item.photo && h('img', { src: item.photo, className: 'w-16 h-16 rounded-lg object-cover' }),
+                    h('div', { className: 'flex-1' },
+                      h('div', { className: 'font-bold text-white' }, item.fullName),
+                      h('div', { className: 'text-sm text-slate-400 space-y-1 mt-1' },
+                        item.employeeCode && h('div', null, `รหัส: ${item.employeeCode}`),
+                        h('div', null, `ตำแหน่ง: ${item.position}`),
+                        h('div', null, `สังกัด: ${item.department}`),
+                        h('div', null, `การไฟฟ้า: ${LOCATIONS[item.locationId] || item.locationId}`),
+                        h('div', { className: 'text-xs text-slate-500' },
+                          `เวลา: ${new Date(item.timestamp).toLocaleTimeString('th-TH')}`
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+        
+        attendances.length === 0 && h('div', { className: 'text-center py-12 text-slate-500' },
+          'ไม่มีข้อมูลในช่วงเวลาที่เลือก'
+        )
+      );
+    }
+    
+    // Admin Dashboard
+    function AdminDashboard() {
+      const [stats, setStats] = useState({ total: 0, today: 0, thisWeek: 0, thisMonth: 0 });
+      const [recentAttendances, setRecentAttendances] = useState([]);
+      
+      useEffect(() => { loadStats(); }, []);
+      
+      const loadStats = async () => {
+        const result = await db.collection('attendances').get();
+        const data = result.docs.map(doc => doc.data());
+        
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        
+        setStats({
+          total: data.length,
+          today: data.filter(item => item.date === today).length,
+          thisWeek: data.filter(item => item.date >= weekAgo).length,
+          thisMonth: data.filter(item => item.date >= monthAgo).length
+        });
+        
+        const recent = data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 10);
+        setRecentAttendances(recent);
+      };
+      
+      return h('div', { className: 'space-y-6' },
+        h('h2', { className: 'text-2xl font-bold text-emerald-400' }, '👨‍💼 Admin Dashboard'),
+        
+        h('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' },
+          h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+            h('div', { className: 'text-3xl font-black text-emerald-400 mb-1' }, stats.today),
+            h('div', { className: 'text-sm text-slate-400' }, 'วันนี้')
+          ),
+          h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+            h('div', { className: 'text-3xl font-black text-blue-400 mb-1' }, stats.thisWeek),
+            h('div', { className: 'text-sm text-slate-400' }, '7 วันล่าสุด')
+          ),
+          h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+            h('div', { className: 'text-3xl font-black text-purple-400 mb-1' }, stats.thisMonth),
+            h('div', { className: 'text-sm text-slate-400' }, '30 วันล่าสุด')
+          ),
+          h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+            h('div', { className: 'text-3xl font-black text-pink-400 mb-1' }, stats.total),
+            h('div', { className: 'text-sm text-slate-400' }, 'ทั้งหมด')
+          )
+        ),
+        
+        h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+          h('h3', { className: 'text-lg font-bold text-emerald-400 mb-4' }, '🕐 ล่าสุด (10 รายการ)'),
+          h('div', { className: 'space-y-2' },
+            recentAttendances.map((item, idx) =>
+              h('div', { key: idx, className: 'bg-slate-900 rounded-lg p-3 flex justify-between items-center' },
+                h('div', null,
+                  h('div', { className: 'font-bold text-white' }, item.fullName),
+                  h('div', { className: 'text-sm text-slate-400' },
+                    `${item.position} - ${LOCATIONS[item.locationId] || item.locationId}`
+                  )
+                ),
+                h('div', { className: 'text-sm text-slate-500' },
+                  new Date(item.timestamp).toLocaleString('th-TH')
+                )
+              )
+            )
+          )
+        )
+      );
+    }
+    
+    // Public Dashboard
+    function PublicDashboard() {
+      const [todayCount, setTodayCount] = useState(0);
+      
+      useEffect(() => {
+        const loadToday = async () => {
+          const result = await db.collection('attendances').get();
+          const data = result.docs.map(doc => doc.data());
+          const today = new Date().toISOString().split('T')[0];
+          setTodayCount(data.filter(item => item.date === today).length);
+        };
+        loadToday();
+        const interval = setInterval(loadToday, 5000);
+        return () => clearInterval(interval);
+      }, []);
+      
+      return h('div', { className: 'flex items-center justify-center min-h-[60vh]' },
+        h('div', { className: 'text-center' },
+          h('h2', { className: 'text-6xl font-black text-emerald-400 mb-4' }, '📺 Public Dashboard'),
+          h('div', { className: 'bg-slate-800 rounded-3xl p-12' },
+            h('div', { className: 'text-8xl font-black text-white mb-4' }, todayCount),
+            h('div', { className: 'text-2xl text-slate-400' }, 'คนเข้าร่วมวันนี้')
+          ),
+          h('div', { className: 'mt-6 text-slate-500' },
+            `อัพเดทล่าสุด: ${new Date().toLocaleTimeString('th-TH')}`
+          )
+        )
+      );
+    }
+    
+    // Settings View
+    function SettingsView({ onLocationChange }) {
+      const [selectedLocation, setSelectedLocation] = useState('lampun');
+      
+      const handleLocationChange = (locId) => {
+        setSelectedLocation(locId);
+        onLocationChange(locId);
+      };
+      
+      return h('div', { className: 'space-y-6' },
+        h('h2', { className: 'text-2xl font-bold text-emerald-400' }, '⚙️ การตั้งค่า'),
+        
+        h('div', { className: 'bg-slate-800 rounded-xl p-6' },
+          h('h3', { className: 'text-lg font-bold text-emerald-400 mb-4' }, '📍 เลือกการไฟฟ้า'),
+          h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-3' },
+            Object.entries(LOCATIONS).map(([id, name]) =>
+              h('button', {
+                key: id,
+                onClick: () => handleLocationChange(id),
+                className: `p-4 rounded-lg text-left ${
+                  selectedLocation === id
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
+                }`
+              },
+                h('div', { className: 'font-bold' }, name),
+                h('div', { className: 'text-sm opacity-75' }, `รหัส: ${id}`)
+              )
+            )
+          )
+        ),
+        
+        selectedLocation && h('div', { className: 'bg-emerald-500/20 border border-emerald-500 rounded-lg p-4' },
+          h('div', { className: 'text-emerald-400 font-bold' },
+            `✅ การไฟฟ้าปัจจุบัน: ${LOCATIONS[selectedLocation]}`
+          )
+        )
+      );
+    }
+    
+    // Render App
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(h(SafetyTalkApp));
+    console.log('%c✅ Safety Talk System Ready!', 'color:#10b981;font-weight:bold;font-size:18px');
+  </script>
+</body>
+</html>
