@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Safety Talk - PEA Lamphun</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    .leaflet-container { background:#1e293b; }
+    .pea-marker-ring { border:3px solid #10b981; border-radius:50%; background:rgba(16,185,129,0.15); animation:pulse-ring 2s infinite; }
+    @keyframes pulse-ring { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.15);opacity:0.7} }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- โหลดตามลำดับ: React → Babel → SheetJS → Firebase → Init → App -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBRgmrCDHmiURSKJayo6h9yL4t3kUD5SxQ",
+      authDomain: "safety-talk-pea.firebaseapp.com",
+      projectId: "safety-talk-pea",
+      storageBucket: "safety-talk-pea.firebasestorage.app",
+      messagingSenderId: "340855934706",
+      appId: "1:340855934706:web:78f965402525bfe3390a6b"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+    // ============ CONFIG ============
+    const IMGBB_API_KEY  = "eb2ee72c284a3fd3100d350fc1971f24";
+    const IMGBB_EXPIRE   = 7776000; // 90 วัน
+    const MAX_DIST       = 50;      // เมตรจริง (แสดงผู้ใช้ 20 เมตร)
+    const TIME_START     = "08:00";
+    const TIME_END       = "09:30";
+    // Admin PIN — เปลี่ยนได้ตามต้องการ
+    const ADMIN_PIN      = "1234";
+
+    const LOCATIONS = {
+      lampun:        { id:"lampun",        name:"กฟจ.ลำพูน",         fullName:"การไฟฟ้าส่วนภูมิภาคจังหวัดลำพูน",         lat:18.5745, lng:99.0087 },
+      pasang:        { id:"pasang",        name:"กฟส.ป่าซาง",        fullName:"การไฟฟ้าส่วนภูมิภาคสาขาป่าซาง",           lat:18.5235, lng:98.9394 },
+      banhong:       { id:"banhong",       name:"กฟส.บ้านโฮ่ง",      fullName:"การไฟฟ้าส่วนภูมิภาคสาขาบ้านโฮ่ง",         lat:18.7367, lng:98.9436 },
+      li:            { id:"li",            name:"กฟส.ลี้",            fullName:"การไฟฟ้าส่วนภูมิภาคสาขาลี้",              lat:18.2773, lng:99.0534 },
+      banthi:        { id:"banthi",        name:"กฟส.บ้านธิ",        fullName:"การไฟฟ้าส่วนภูมิภาคสาขาบ้านธิ",           lat:18.4156, lng:99.1367 },
+      maeta:         { id:"maeta",         name:"กฟส.แม่ทา",         fullName:"การไฟฟ้าส่วนภูมิภาคสาขาแม่ทา",            lat:18.1856, lng:99.2678 },
+      nakornchadee:  { id:"nakornchadee",  name:"กฟส.นครเจดีย์",     fullName:"การไฟฟ้าส่วนภูมิภาคสาขานครเจดีย์",        lat:18.3456, lng:99.5134 },
+      wiangnonglong: { id:"wiangnonglong", name:"กฟส.เวียงหนองล่อง", fullName:"การไฟฟ้าส่วนภูมิภาคสาขาเวียงหนองล่อง",    lat:18.6523, lng:99.2134 },
+      thunghuachang: { id:"thunghuachang", name:"กฟส.ทุ่งหัวช้าง",   fullName:"การไฟฟ้าส่วนภูมิภาคสาขาทุ่งหัวช้าง",      lat:18.4012, lng:99.3245 },
+      maetuen:       { id:"maetuen",       name:"กฟส.แม่ตืน",        fullName:"การไฟฟ้าส่วนภูมิภาคสาขาแม่ตืน",           lat:18.1234, lng:99.4567 },
+    };
+
+    // ============ HELPERS ============
+    const calcDist = (la1,lo1,la2,lo2) => {
+      const R=6371e3,p1=la1*Math.PI/180,p2=la2*Math.PI/180,
+            dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180,
+            a=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+      return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    };
+    const withinTime = (s,e) => {
+      const n=new Date(), t=`${String(n.getHours()).padStart(2,"0")}:${String(n.getMinutes()).padStart(2,"0")}`;
+      return t>=s && t<=e;
+    };
+    const thaiDT  = d => new Date(d).toLocaleDateString("th-TH",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"});
+    const thaiD   = d => new Date(d).toLocaleDateString("th-TH",{year:"numeric",month:"short",day:"numeric"});
+    const compress = (b64,maxW=800,q=0.75) => new Promise((res,rej)=>{
+      const img=new Image();
+      img.onload=()=>{ const c=document.createElement("canvas"); let w=img.width,h=img.height; if(w>maxW){h=Math.round(h*maxW/w);w=maxW;} c.width=w;c.height=h; c.getContext("2d").drawImage(img,0,0,w,h); res(c.toDataURL("image/jpeg",q)); };
+      img.onerror=()=>rej(new Error("img")); img.src=b64;
+    });
+    const uploadImgBB = async b64 => {
+      const data=b64.includes(",")?b64.split(",")[1]:b64;
+      const f=new FormData(); f.append("key",IMGBB_API_KEY); f.append("image",data); f.append("expiration",IMGBB_EXPIRE);
+      const r=await fetch("https://api.imgbb.com/1/upload",{method:"POST",body:f});
+      const j=await r.json();
+      if(!j.success) throw new Error("ImgBB: "+JSON.stringify(j));
+      return { url:j.data.url, thumb:j.data.thumb?.url||j.data.url, del:j.data.delete_url };
+    };
+
+    // สัปดาห์นี้
+    const getWeekRange = () => {
+      const now=new Date(), day=now.getDay(), diff=day===0?-6:1-day;
+      const mon=new Date(now); mon.setDate(now.getDate()+diff); mon.setHours(0,0,0,0);
+      const sun=new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
+      return { start:mon.toISOString().slice(0,10), end:sun.toISOString().slice(0,10) };
+    };
+    const toInputDate = iso => iso.slice(0,10);
+
+    // ============ ICONS ============
+    const Ic = ({sz=20,cl="",ch}) => <svg xmlns="http://www.w3.org/2000/svg" width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cl}>{ch}</svg>;
+    const ICamera  = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>}/>;
+    const IMapPin  = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></>}/>;
+    const IClock   = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>}/>;
+    const ICheck   = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>}/>;
+    const IXCircle = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></>}/>;
+    const IAlert   = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>}/>;
+    const ICog     = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>}/>;
+    const IQr      = p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><rect x="13" y="13" width="2" height="2"/><rect x="16" y="16" width="2" height="2"/></>}/>;
+    const IDl      = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>}/>;
+    const IBar     = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></>}/>;
+    const IFlip    = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></>}/>;
+    const IEye     = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}/>;
+    const IFile    = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>}/>;
+    const ILock    = p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>}/>;
+    const ISpin    = p=><Ic sz={p.sz} cl={p.cl+" animate-spin"} ch={<><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>}/>;
+    const ICalendar= p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>}/>;
+    const IFilter  = p=><Ic sz={p.sz} cl={p.cl} ch={<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>}/>;
+
+    // ============ INPUT FIELD ============
+    const Field = ({label,name,value,onChange,required,placeholder,type="text"}) => (
+      <div>
+        <label className="block text-slate-400 text-sm font-semibold mb-1">
+          {label}{required&&<span className="text-red-400 ml-1">*</span>}
+        </label>
+        <input type={type} value={value} onChange={e=>onChange(name,e.target.value)} required={required}
+          placeholder={placeholder||""}
+          className="w-full bg-slate-900/80 border-2 border-slate-700 text-white px-4 py-2.5 rounded-lg focus:border-emerald-500 focus:outline-none transition-colors"/>
+      </div>
+    );
+
+    // ============ MAIN APP ============
+    function App() {
+      const [view,setView]         = useState("register"); // register | admin
+      const [adminAuth,setAdminAuth] = useState(false);
+      const [adminTab,setAdminTab] = useState("reports");
+      const [atts,setAtts]         = useState([]);
+      const [loading,setLoading]   = useState(false);
+      const [curLoc,setCurLoc]     = useState("lampun");
+      const [locs,setLocs]         = useState(()=>{
+        try { const s=localStorage.getItem("pea-locs"); return s?JSON.parse(s):LOCATIONS; } catch(e){return LOCATIONS;}
+      });
+
+      // อ่าน ?location= และ ?admin= จาก URL
+      useEffect(()=>{
+        const p=new URLSearchParams(window.location.search);
+        const l=p.get("location");
+        if(l&&locs[l]) setCurLoc(l);
+        // ถ้ามี ?admin=1 ใน URL → แสดงหน้า admin (ต้อง login)
+        if(p.get("admin")==="1") setView("admin");
+      },[]);
+
+      const loc = locs[curLoc]||Object.values(locs)[0];
+
+      const addAtt = a => setAtts(prev=>[a,...prev]);
+
+      // โหลดข้อมูลเฉพาะตอนเข้า admin และ auth แล้ว
+      useEffect(()=>{
+        if(view==="admin"&&adminAuth&&atts.length===0){
+          setLoading(true);
+          db.collection("attendances").orderBy("timestamp","desc").get()
+            .then(s=>setAtts(s.docs.map(d=>({id:d.id,...d.data()}))))
+            .catch(console.error)
+            .finally(()=>setLoading(false));
+        }
+      },[view,adminAuth]);
+
+      // ---- REGISTER VIEW (ผู้ใช้ทั่วไป) ----
+      if(view==="register") return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+          <div className="max-w-2xl mx-auto px-4 py-6">
+            {/* Header เล็กๆ ไม่มี nav */}
+            <div className="flex items-center justify-center mb-6 space-x-3">
+              <div className="bg-emerald-500/20 p-2 rounded-xl"><IQr sz={28} cl="text-emerald-400"/></div>
+              <div className="text-center">
+                <h1 className="text-xl font-black text-emerald-400">Safety Talk</h1>
+                <p className="text-amber-400 font-bold text-sm">{loc.name}</p>
+              </div>
+            </div>
+            <RegisterForm onDone={addAtt} curLoc={curLoc} loc={loc}/>
+          </div>
+        </div>
+      );
+
+      // ---- ADMIN LOGIN ----
+      if(view==="admin"&&!adminAuth) return (
+        <AdminLogin onAuth={()=>setAdminAuth(true)}/>
+      );
+
+      // ---- ADMIN PANEL ----
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+          <nav className="bg-slate-900/80 backdrop-blur-lg border-b border-emerald-500/20 sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-3 py-3 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center space-x-3">
+                <div className="bg-emerald-500/20 p-2 rounded-xl"><IQr sz={26} cl="text-emerald-400"/></div>
+                <div>
+                  <h1 className="text-lg font-black text-emerald-400">Safety Talk — Admin</h1>
+                  <p className="text-slate-400 text-xs">PEA Lamphun</p>
+                </div>
+              </div>
+              <div className="flex gap-1">
+                {[["reports",<IBar sz={16}/>,"รายงาน"],["settings",<ICog sz={16}/>,"ตั้งค่า"]].map(([v,ico,lbl])=>(
+                  <button key={v} onClick={()=>setAdminTab(v)}
+                    className={`px-3 py-2 rounded-lg font-bold text-sm flex items-center gap-1 transition-all ${adminTab===v?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    {ico}<span>{lbl}</span>
+                  </button>
+                ))}
+                <button onClick={()=>{setAdminAuth(false);setView("register");}}
+                  className="px-3 py-2 rounded-lg font-bold text-sm bg-slate-800 text-slate-400 hover:bg-red-500/20 hover:text-red-400">
+                  ออก
+                </button>
+              </div>
+            </div>
+          </nav>
+          <div className="max-w-7xl mx-auto px-4 py-6">
+            {loading
+              ? <div className="flex items-center justify-center py-24"><ISpin sz={40} cl="text-emerald-400"/></div>
+              : adminTab==="reports"
+                ? <ReportsView atts={atts} locs={locs}/>
+                : <SettingsView curLoc={curLoc} setCurLoc={setCurLoc} locs={locs} setLocs={setLocs}/>
+            }
+          </div>
+        </div>
+      );
+    }
+
+    // ============ ADMIN LOGIN ============
+    function AdminLogin({ onAuth }) {
+      const [pin,setPin] = useState("");
+      const [err,setErr] = useState("");
+      const check = () => { if(pin===ADMIN_PIN){onAuth();} else {setErr("PIN ไม่ถูกต้อง");setPin("");} };
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-8 shadow-2xl w-full max-w-sm text-center">
+            <div className="inline-block bg-emerald-500/20 p-4 rounded-full mb-4"><ILock sz={40} cl="text-emerald-400"/></div>
+            <h2 className="text-2xl font-black text-white mb-2">Admin Login</h2>
+            <p className="text-slate-400 text-sm mb-6">กรอก PIN เพื่อเข้าสู่ระบบแอดมิน</p>
+            <input type="password" value={pin} onChange={e=>setPin(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&check()}
+              placeholder="PIN"
+              className="w-full bg-slate-900/80 border-2 border-slate-700 text-white px-4 py-3 rounded-lg focus:border-emerald-500 focus:outline-none text-center text-2xl tracking-widest mb-3"/>
+            {err&&<p className="text-red-400 text-sm mb-3">{err}</p>}
+            <button onClick={check}
+              className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50">
+              เข้าสู่ระบบ
+            </button>
+            <p className="text-slate-600 text-xs mt-4">เฉพาะผู้ดูแลระบบเท่านั้น</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ REGISTER FORM ============
+    function RegisterForm({ onDone, curLoc, loc }) {
+      const [step,setStep]       = useState("form"); // form | photo | submitting | success | error
+      const [form,setForm]       = useState({ empId:"", fullName:"", position:"", department:"" });
+      const [photo,setPhoto]     = useState(null);
+      const [camMode,setCamMode] = useState("environment");
+      const [camOpen,setCamOpen] = useState(false);
+      const [err,setErr]         = useState("");
+      const [saveMsg,setSaveMsg] = useState("");
+      const [savedAtt,setSavedAtt] = useState(null);
+      const [locData,setLocData] = useState(null);
+      const vidRef=useRef(null); const canRef=useRef(null); const stRef=useRef(null);
+
+      const setF = (k,v) => setForm(prev=>({...prev,[k]:v}));
+
+      const startCam = useCallback(async mode=>{
+        if(stRef.current) stRef.current.getTracks().forEach(t=>t.stop());
+        try {
+          const st=await navigator.mediaDevices.getUserMedia({
+            video:{ facingMode:{ exact: mode||camMode } }, audio:false
+          });
+          stRef.current=st; if(vidRef.current) vidRef.current.srcObject=st; setCamOpen(true);
+        } catch(e1){
+          // fallback: ไม่ exact
+          try {
+            const st=await navigator.mediaDevices.getUserMedia({ video:{ facingMode:mode||camMode }, audio:false });
+            stRef.current=st; if(vidRef.current) vidRef.current.srcObject=st; setCamOpen(true);
+          } catch(e2){ alert("ไม่สามารถเปิดกล้องได้: "+e2.message); }
+        }
+      },[camMode]);
+
+      const stopCam = () => { if(stRef.current){stRef.current.getTracks().forEach(t=>t.stop());stRef.current=null;} setCamOpen(false); };
+
+      const capture = async () => {
+        const v=vidRef.current,c=canRef.current; if(!v||!c) return;
+        c.width=v.videoWidth; c.height=v.videoHeight; c.getContext("2d").drawImage(v,0,0);
+        stopCam(); setPhoto(await compress(c.toDataURL("image/jpeg",0.92),800,0.78));
+      };
+
+      const flip = () => { const m=camMode==="environment"?"user":"environment"; setCamMode(m); startCam(m); };
+
+      const handleSubmit = async () => {
+        setStep("submitting"); setErr("");
+        setSaveMsg("กำลังตรวจสอบเวลา...");
+        if(!withinTime(TIME_START,TIME_END)){
+          setErr(`ลงทะเบียนได้เฉพาะเวลา ${TIME_START} - ${TIME_END} น.`); setStep("error"); return;
+        }
+        setSaveMsg("กำลังตรวจสอบตำแหน่ง GPS...");
+        if(!navigator.geolocation){ setErr("เบราว์เซอร์ไม่รองรับ GPS"); setStep("error"); return; }
+        navigator.geolocation.getCurrentPosition(async pos=>{
+          const dist=calcDist(pos.coords.latitude,pos.coords.longitude,loc.lat,loc.lng);
+          if(dist>MAX_DIST){
+            setErr(`คุณอยู่ห่างจากจุดกิจกรรม ${dist.toFixed(0)} เมตร (อนุญาตไม่เกิน 20 เมตร)`);
+            setStep("error"); return;
+          }
+          const ld={lat:pos.coords.latitude,lng:pos.coords.longitude,distance:dist.toFixed(1)};
+          try {
+            setSaveMsg("กำลังอัปโหลดรูปไป ImgBB...");
+            const img=await uploadImgBB(photo);
+            setSaveMsg("กำลังบันทึกข้อมูล...");
+            const att={
+              empId:      form.empId.trim()||null,
+              fullName:   form.fullName.trim(),
+              position:   form.position.trim(),
+              department: form.department.trim(),
+              timestamp:  new Date().toISOString(),
+              location:   ld,
+              locationId: curLoc,
+              locationName:loc.name,
+              photoURL:   img.url,
+              photoThumb: img.thumb,
+              distance:   ld.distance,
+            };
+            const ref=await db.collection("attendances").add(att);
+            const full={id:ref.id,...att};
+            onDone(full); setLocData(ld); setSavedAtt(full); setStep("success");
+          } catch(e){ setErr("เกิดข้อผิดพลาด: "+e.message); setStep("error"); }
+        },()=>{ setErr("ไม่สามารถตรวจสอบตำแหน่งได้ กรุณาเปิด GPS"); setStep("error"); },
+        {enableHighAccuracy:true,timeout:15000});
+      };
+
+      const reset = () => {
+        setStep("form"); setForm({empId:"",fullName:"",position:"",department:""});
+        setPhoto(null); setErr(""); setSavedAtt(null); setLocData(null); stopCam();
+      };
+
+      // ── FORM STEP ──
+      if(step==="form") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-6 shadow-2xl">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center space-x-2 bg-emerald-500/20 border border-emerald-500/40 px-5 py-2.5 rounded-xl">
+              <IMapPin sz={18} cl="text-emerald-400"/>
+              <div className="text-left">
+                <div className="text-emerald-400 font-black leading-tight">{loc.name}</div>
+                <div className="text-slate-400 text-xs">{loc.fullName}</div>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <Field label="รหัสพนักงาน / ลูกจ้าง" name="empId"     value={form.empId}      onChange={setF} placeholder="เว้นว่างได้หากไม่มีรหัส"/>
+            <Field label="ชื่อ-นามสกุล"  name="fullName"   value={form.fullName}   onChange={setF} required placeholder="เช่น นาย ชื่อ-นามสกุล"/>
+            <Field label="ตำแหน่ง"         name="position"   value={form.position}   onChange={setF} required placeholder="เช่น พชง.3, ชชง, คนงาน"/>
+            <Field label="สังกัด / แผนก"   name="department" value={form.department} onChange={setF} required placeholder="เช่น ผกส., ผปบ., ผมต."/>
+          </div>
+          <div className="mt-4 bg-slate-900/50 border border-slate-700 rounded-lg p-3 text-xs text-slate-400 space-y-1">
+            <p className="text-slate-300 font-semibold flex items-center"><IAlert sz={13} cl="text-yellow-400 mr-1.5"/>เงื่อนไขการลงทะเบียน</p>
+            <p className="flex items-center"><IClock sz={12} cl="text-emerald-400 mr-1.5"/>เวลา {TIME_START} - {TIME_END} น.</p>
+            <p className="flex items-center"><IMapPin sz={12} cl="text-emerald-400 mr-1.5"/>ต้องอยู่ภายในรัศมี 20 เมตร จากจุดลงทะเบียน</p>
+            <p className="flex items-center"><ICamera sz={12} cl="text-emerald-400 mr-1.5"/>ต้องถ่ายรูปยืนยันตัวตน</p>
+          </div>
+          <button
+            onClick={()=>{
+              if(!form.fullName.trim()||!form.position.trim()||!form.department.trim()){
+                alert("กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบ"); return;
+              }
+              setStep("photo");
+            }}
+            className="mt-4 w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-4 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50 text-lg">
+            ถัดไป → ถ่ายรูปยืนยันตัวตน
+          </button>
+        </div>
+      );
+
+      // ── PHOTO STEP ──
+      if(step==="photo") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-6 shadow-2xl">
+          <div className="text-center mb-5">
+            <h2 className="text-xl font-black text-white mb-1">ถ่ายรูปยืนยันตัวตน</h2>
+            <p className="text-emerald-400 text-sm font-semibold">{form.fullName}</p>
+            <p className="text-slate-400 text-xs">{form.position} • {form.department}</p>
+          </div>
+          <div className="space-y-3">
+            {!photo && !camOpen && (
+              <button onClick={()=>startCam()}
+                className="w-full bg-slate-700 border-2 border-slate-600 text-white font-bold py-5 rounded-lg hover:bg-slate-600 flex items-center justify-center text-lg">
+                <ICamera sz={22} cl="mr-3"/>เปิดกล้องถ่ายรูป
+              </button>
+            )}
+            {camOpen && !photo && (
+              <div className="space-y-2">
+                <div className="relative bg-black rounded-xl overflow-hidden">
+                  <video ref={vidRef} autoPlay playsInline muted className="w-full h-auto"/>
+                  <div className="absolute inset-0 border-4 border-emerald-500/40 rounded-xl pointer-events-none"/>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-40 h-52 border-4 border-emerald-400/60 rounded-full"/>
+                  </div>
+                  <button onClick={flip} className="absolute top-3 right-3 bg-slate-900/80 text-white p-2.5 rounded-xl border border-emerald-500/30">
+                    <IFlip sz={20}/>
+                  </button>
+                  <div className="absolute bottom-2 left-0 right-0 flex justify-center">
+                    <span className="text-white text-xs bg-slate-900/80 px-3 py-1 rounded-full">
+                      {camMode==="environment"?"📷 กล้องหลัง":"🤳 กล้องหน้า"} — กดสลับกล้องได้ที่ปุ่มขวาบน
+                    </span>
+                  </div>
+                </div>
+                <div className="flex space-x-3">
+                  <button onClick={()=>{stopCam();setStep("form");}} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-lg hover:bg-slate-600">← กลับ</button>
+                  <button onClick={capture} className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg">
+                    <ICamera sz={18} cl="inline mr-2"/>ถ่ายรูป
+                  </button>
+                </div>
+              </div>
+            )}
+            {photo && (
+              <div className="space-y-3">
+                <div className="relative rounded-xl overflow-hidden">
+                  <img src={photo} alt="preview" className="w-full h-auto rounded-xl"/>
+                  <div className="absolute top-3 right-3 bg-emerald-500/90 text-slate-900 px-3 py-1 rounded-full text-sm font-bold">✓ ถ่ายแล้ว</div>
+                </div>
+                <div className="flex space-x-3">
+                  <button onClick={()=>{setPhoto(null);startCam();}} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-lg">ถ่ายใหม่</button>
+                  <button onClick={handleSubmit} className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg">
+                    ยืนยันลงทะเบียน →
+                  </button>
+                </div>
+              </div>
+            )}
+            <canvas ref={canRef} className="hidden"/>
+          </div>
+        </div>
+      );
+
+      // ── SUBMITTING ──
+      if(step==="submitting") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-10 shadow-2xl text-center">
+          <ISpin sz={56} cl="text-emerald-400 mx-auto mb-5"/>
+          <p className="text-white font-bold text-lg mb-1">กำลังดำเนินการ...</p>
+          <p className="text-emerald-400 text-sm">{saveMsg}</p>
+          <p className="text-slate-500 text-xs mt-2">กรุณาอย่าปิดหน้าจอ</p>
+        </div>
+      );
+
+      // ── SUCCESS ──
+      if(step==="success") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="inline-block bg-emerald-500/20 p-6 rounded-full mb-5"><ICheck sz={60} cl="text-emerald-400"/></div>
+          <h2 className="text-3xl font-black text-white mb-2">ลงทะเบียนสำเร็จ!</h2>
+          <p className="text-emerald-400 font-bold mb-5">บันทึกข้อมูลและรูปภาพเรียบร้อยแล้ว</p>
+          <div className="bg-slate-900/50 rounded-xl p-5 mb-5 text-left space-y-2 text-sm">
+            <p><span className="text-slate-500">ชื่อ-นามสกุล:</span> <span className="text-white font-bold">{savedAtt?.fullName}</span></p>
+            <p><span className="text-slate-500">ตำแหน่ง:</span> <span className="text-white">{savedAtt?.position}</span></p>
+            <p><span className="text-slate-500">สังกัด:</span> <span className="text-white">{savedAtt?.department}</span></p>
+            <p><span className="text-slate-500">หน่วยงาน:</span> <span className="text-emerald-400 font-bold">{loc.name}</span></p>
+            <p><span className="text-slate-500">ระยะห่าง:</span> <span className="text-emerald-400 font-bold">{locData?.distance} เมตร</span></p>
+            <p><span className="text-slate-500">เวลา:</span> <span className="text-white">{thaiDT(new Date())}</span></p>
+            {savedAtt?.photoURL&&<img src={savedAtt.photoURL} alt="saved" className="w-full max-h-48 object-cover rounded-lg mt-2 border border-emerald-500/30"/>}
+          </div>
+          <button onClick={reset} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-4 rounded-lg text-lg">
+            ลงทะเบียนคนถัดไป
+          </button>
+        </div>
+      );
+
+      // ── ERROR ──
+      if(step==="error") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-red-500/30 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="inline-block bg-red-500/20 p-6 rounded-full mb-5"><IXCircle sz={60} cl="text-red-400"/></div>
+          <h2 className="text-2xl font-black text-white mb-3">ไม่สามารถลงทะเบียนได้</h2>
+          <p className="text-red-400 mb-6 font-semibold">{err}</p>
+          <button onClick={reset} className="w-full bg-slate-700 text-white font-bold py-4 rounded-lg hover:bg-slate-600">ลองใหม่อีกครั้ง</button>
+        </div>
+      );
+      return null;
+    }
+
+    // ============ REPORTS VIEW ============
+    function ReportsView({ atts, locs }) {
+      const week = getWeekRange();
+      const [selLoc,setSelLoc]     = useState("lampun");
+      const [dateFrom,setDateFrom] = useState(week.start);
+      const [dateTo,setDateTo]     = useState(week.end);
+      const [modal,setModal]       = useState(null);
+
+      const locAtts = useMemo(()=>{
+        return atts.filter(a=>{
+          if(a.locationId!==selLoc) return false;
+          const d=a.timestamp.slice(0,10);
+          return d>=dateFrom && d<=dateTo;
+        });
+      },[atts,selLoc,dateFrom,dateTo]);
+
+      const loc = locs[selLoc]||Object.values(locs)[0];
+
+      // Export Excel
+      const exportExcel = () => {
+        const rows = locAtts.map(a=>({
+          "รหัสพนักงาน":    a.empId||"-",
+          "ชื่อ-นามสกุล":   a.fullName,
+          "ตำแหน่ง":        a.position,
+          "สังกัด/แผนก":    a.department,
+          "หน่วยงาน":       a.locationName,
+          "วันที่":         thaiD(a.timestamp),
+          "เวลา":           new Date(a.timestamp).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}),
+          "ระยะห่าง (ม.)":  a.distance,
+          "พิกัด Lat":      a.location?.lat?.toFixed(6)||"",
+          "พิกัด Lng":      a.location?.lng?.toFixed(6)||"",
+          "URL รูปภาพ":     a.photoURL||"",
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, loc.name);
+        XLSX.writeFile(wb, `safety-talk-${selLoc}-${dateFrom}-${dateTo}.xlsx`);
+      };
+
+      return (
+        <div className="space-y-5">
+          {/* Photo Modal */}
+          {modal&&(
+            <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4" onClick={()=>setModal(null)}>
+              <div className="relative max-w-md w-full" onClick={e=>e.stopPropagation()}>
+                <img src={modal.photoURL} alt="proof" className="w-full rounded-2xl shadow-2xl border-2 border-emerald-500/40"/>
+                <div className="mt-3 bg-slate-900/95 rounded-xl p-4 text-sm space-y-1">
+                  <p className="text-white font-black text-base">{modal.fullName}</p>
+                  <p className="text-slate-300">{modal.position} • {modal.department}</p>
+                  <p className="text-emerald-400 font-semibold">{thaiDT(modal.timestamp)}</p>
+                  <p className="text-slate-300">📍 ระยะห่าง <span className="text-white font-bold">{modal.distance} ม.</span></p>
+                  <p className="text-slate-400 text-xs font-mono">พิกัด: {modal.location?.lat?.toFixed(6)}, {modal.location?.lng?.toFixed(6)}</p>
+                  {modal.empId&&<p className="text-slate-400 text-xs">รหัสพนักงาน: {modal.empId}</p>}
+                  <a href={modal.photoURL} target="_blank" rel="noreferrer" className="inline-block mt-1 text-sky-400 text-xs underline">เปิดรูปในแท็บใหม่ ↗</a>
+                </div>
+                <button onClick={()=>setModal(null)} className="absolute top-2 right-2 bg-slate-900/80 text-white w-9 h-9 rounded-full flex items-center justify-center font-black text-lg hover:bg-red-500 transition-colors">✕</button>
+              </div>
+            </div>
+          )}
+
+          {/* เลือกหน่วยงาน */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h2 className="text-xl font-black text-white mb-4 flex items-center"><IBar sz={22} cl="text-emerald-400 mr-2"/>เลือกหน่วยงาน</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+              {Object.values(locs).map(l=>(
+                <button key={l.id} onClick={()=>setSelLoc(l.id)}
+                  className={`px-3 py-2.5 rounded-xl font-bold text-xs transition-all text-center ${selLoc===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700/80 text-slate-300 hover:bg-slate-600"}`}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 p-3 bg-slate-900/50 rounded-lg">
+              <p className="text-emerald-400 font-bold">{loc.name}</p>
+              <p className="text-slate-400 text-xs">{loc.fullName}</p>
+            </div>
+          </div>
+
+          {/* กรองวันที่ + Export */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <div className="flex flex-wrap gap-3 items-end justify-between">
+              <div className="flex items-center gap-3 flex-wrap">
+                <IFilter sz={18} cl="text-emerald-400"/>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">จากวันที่</label>
+                  <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+                    className="bg-slate-900/80 border-2 border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none text-sm"/>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">ถึงวันที่</label>
+                  <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+                    className="bg-slate-900/80 border-2 border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none text-sm"/>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={()=>{const w=getWeekRange();setDateFrom(w.start);setDateTo(w.end);}}
+                    className="bg-slate-700 text-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-600">สัปดาห์นี้</button>
+                  <button onClick={()=>{const n=new Date();setDateFrom(new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10));setDateTo(new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().slice(0,10));}}
+                    className="bg-slate-700 text-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-600">เดือนนี้</button>
+                </div>
+              </div>
+              <button onClick={exportExcel}
+                className="bg-emerald-500 text-slate-900 font-bold px-5 py-2.5 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50 flex items-center text-sm">
+                <IDl sz={16} cl="mr-2"/>Export Excel
+              </button>
+            </div>
+            <div className="mt-3 text-slate-400 text-sm">
+              พบ <span className="text-white font-bold">{locAtts.length}</span> รายการ ระหว่าง {thaiD(dateFrom+"T00:00:00")} — {thaiD(dateTo+"T00:00:00")}
+            </div>
+          </div>
+
+          {/* Photo Grid */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h3 className="text-lg font-black text-white mb-1 flex items-center"><IEye sz={20} cl="text-emerald-400 mr-2"/>หลักฐานรูปภาพ</h3>
+            <p className="text-slate-400 text-xs mb-4">กดที่รูปเพื่อดูรายละเอียดและพิกัด • รูปเก็บที่ ImgBB 90 วัน</p>
+            {locAtts.length===0
+              ? <div className="text-center py-10 text-slate-500"><IFile sz={36} cl="mx-auto mb-3 opacity-50"/><p>ไม่มีข้อมูลในช่วงเวลาที่เลือก</p></div>
+              : <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                  {locAtts.map(a=>(
+                    <div key={a.id} onClick={()=>a.photoURL&&setModal(a)}
+                      className="bg-slate-900/70 rounded-xl overflow-hidden border border-slate-700 hover:border-emerald-500/60 transition-all cursor-pointer group">
+                      {a.photoURL
+                        ?<div className="relative">
+                          <img src={a.photoThumb||a.photoURL} alt="proof" className="w-full h-32 object-cover group-hover:opacity-90 transition-opacity"/>
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 to-transparent"/>
+                          <span className="absolute bottom-2 left-2 text-emerald-400 text-xs font-bold bg-slate-900/80 px-1.5 py-0.5 rounded-full">📍{a.distance}ม.</span>
+                        </div>
+                        :<div className="w-full h-32 bg-slate-800 flex items-center justify-center"><ICamera sz={24} cl="text-slate-600"/></div>
+                      }
+                      <div className="p-2">
+                        <p className="text-white font-bold text-xs truncate">{a.fullName}</p>
+                        <p className="text-slate-400 text-xs truncate">{a.position}</p>
+                        <p className="text-emerald-400 text-xs">{new Date(a.timestamp).toLocaleDateString("th-TH",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+            }
+          </div>
+
+          {/* ตารางข้อมูล */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h3 className="text-lg font-black text-white mb-4">รายละเอียดการลงทะเบียน</h3>
+            <div className="bg-slate-900/50 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-800">
+                  <tr>{["วันที่/เวลา","รหัส","ชื่อ-นามสกุล","ตำแหน่ง","สังกัด","ระยะ(ม.)"].map(h=>(
+                    <th key={h} className="px-3 py-2.5 text-left text-emerald-400 font-bold whitespace-nowrap">{h}</th>
+                  ))}</tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {locAtts.length===0
+                    ?<tr><td colSpan="6" className="px-4 py-10 text-center text-slate-500">ไม่มีข้อมูล</td></tr>
+                    :locAtts.map(a=>(
+                      <tr key={a.id} className="hover:bg-slate-800/50 transition-colors">
+                        <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{new Date(a.timestamp).toLocaleDateString("th-TH",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</td>
+                        <td className="px-3 py-2.5 text-slate-400">{a.empId||"-"}</td>
+                        <td className="px-3 py-2.5 text-white font-medium">{a.fullName}</td>
+                        <td className="px-3 py-2.5 text-slate-300">{a.position}</td>
+                        <td className="px-3 py-2.5 text-slate-300">{a.department}</td>
+                        <td className="px-3 py-2.5 text-center text-emerald-400 font-bold">{a.distance}</td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ SETTINGS VIEW ============
+    // ---- MAP COMPONENT ----
+    function LocationMap({ lat, lng, name, onMapClick }) {
+      const mapRef = useRef(null);
+      const mapObjRef = useRef(null);
+      const markerRef = useRef(null);
+      const circleRef = useRef(null);
+
+      useEffect(()=>{
+        if(!mapRef.current) return;
+        // init map ครั้งเดียว
+        if(!mapObjRef.current) {
+          mapObjRef.current = L.map(mapRef.current, { zoomControl:true }).setView([lat,lng], 17);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution:'© OpenStreetMap',
+            maxZoom:19
+          }).addTo(mapObjRef.current);
+          // คลิกแผนที่เพื่อตั้งพิกัด
+          mapObjRef.current.on('click', e=>{
+            onMapClick(e.latlng.lat, e.latlng.lng);
+          });
+        }
+        return ()=>{};
+      },[]);
+
+      // อัพเดทหมุดและวงกลมเมื่อพิกัดเปลี่ยน
+      useEffect(()=>{
+        if(!mapObjRef.current) return;
+        const validLat = parseFloat(lat)||0, validLng = parseFloat(lng)||0;
+        if(!validLat || !validLng) return;
+
+        // ลบหมุดและวงกลมเก่า
+        if(markerRef.current) mapObjRef.current.removeLayer(markerRef.current);
+        if(circleRef.current) mapObjRef.current.removeLayer(circleRef.current);
+
+        // วงกลมแสดงรัศมี 20 เมตร
+        circleRef.current = L.circle([validLat,validLng], {
+          radius: 20, color:'#10b981', fillColor:'#10b981', fillOpacity:0.15, weight:2
+        }).addTo(mapObjRef.current);
+
+        // หมุด custom
+        const icon = L.divIcon({
+          className:'',
+          html:`<div style="width:36px;height:36px;background:#10b981;border:3px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);font-size:16px;">📍</div>`,
+          iconSize:[36,36], iconAnchor:[18,36]
+        });
+        markerRef.current = L.marker([validLat,validLng], {icon, draggable:true})
+          .bindPopup(`<b>${name}</b><br/>${validLat.toFixed(6)}, ${validLng.toFixed(6)}`)
+          .addTo(mapObjRef.current)
+          .openPopup();
+
+        // ลากหมุดได้
+        markerRef.current.on('dragend', e=>{
+          const p = e.target.getLatLng();
+          onMapClick(p.lat, p.lng);
+        });
+
+        // ย้ายแผนที่ไปที่หมุดใหม่
+        mapObjRef.current.setView([validLat,validLng], mapObjRef.current.getZoom());
+      },[lat,lng,name]);
+
+      return (
+        <div>
+          <div ref={mapRef} style={{height:"320px",borderRadius:"12px",overflow:"hidden",border:"2px solid rgba(16,185,129,0.3)"}}/>
+          <p className="text-slate-500 text-xs mt-2 text-center">
+            💡 กดที่แผนที่เพื่อตั้งพิกัด หรือลากหมุดสีเขียวได้เลย • วงกลมสีเขียว = รัศมี 20 เมตร
+          </p>
+        </div>
+      );
+    }
+
+    function SettingsView({ curLoc, setCurLoc, locs, setLocs }) {
+      const [sel,setSel]   = useState(curLoc);
+      const [saved,setSaved] = useState(false);
+      const cur = locs[sel]||Object.values(locs)[0];
+      const saveLocs = l => localStorage.setItem("pea-locs",JSON.stringify(l));
+
+      const upd   = (la,ln) => setLocs(prev=>({...prev,[sel]:{...prev[sel],lat:parseFloat(la)||0,lng:parseFloat(ln)||0}}));
+      const gps   = () => navigator.geolocation.getCurrentPosition(p=>upd(p.coords.latitude,p.coords.longitude),()=>alert("ไม่สามารถรับตำแหน่งได้"));
+      const save  = () => { saveLocs(locs); setSaved(true); setTimeout(()=>setSaved(false),3000); };
+      const apply = () => { setCurLoc(sel); alert(`เปลี่ยนสถานที่เป็น ${locs[sel].name} แล้ว`); };
+      const copyUrl = url => navigator.clipboard.writeText(url).then(()=>alert("คัดลอกแล้ว!"));
+
+      const base = `${window.location.origin}${window.location.pathname}`;
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-5">
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-6 shadow-xl">
+            <h2 className="text-xl font-black text-white mb-5 flex items-center"><ICog sz={22} cl="text-emerald-400 mr-2"/>ตั้งค่าพิกัดหน่วยงาน</h2>
+
+            {/* เลือกหน่วยงาน */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-4">
+              {Object.values(locs).map(l=>(
+                <button key={l.id} onClick={()=>setSel(l.id)}
+                  className={`px-3 py-2 rounded-xl font-bold text-xs transition-all ${sel===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700 text-slate-300 hover:bg-slate-600"}`}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+            <div className="p-3 bg-slate-900/50 rounded-lg mb-4">
+              <p className="text-emerald-400 font-bold">{cur.name}</p>
+              <p className="text-slate-400 text-sm">{cur.fullName}</p>
+            </div>
+
+            {/* แผนที่ */}
+            <div className="mb-4">
+              <LocationMap key={sel} lat={cur.lat} lng={cur.lng} name={cur.name} onMapClick={(la,ln)=>upd(la,ln)}/>
+            </div>
+
+            {/* input พิกัด */}
+            <div className="grid grid-cols-2 gap-4 mb-3">
+              <div>
+                <label className="block text-slate-400 text-sm font-semibold mb-1">Latitude</label>
+                <input type="number" step="0.000001" value={cur.lat} onChange={e=>upd(e.target.value,cur.lng)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm font-semibold mb-1">Longitude</label>
+                <input type="number" step="0.000001" value={cur.lng} onChange={e=>upd(cur.lat,e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+              </div>
+            </div>
+            <button onClick={gps} className="w-full bg-slate-700 text-white font-bold py-2 rounded-lg hover:bg-slate-600 text-sm mb-4">
+              <IMapPin sz={13} cl="inline mr-1"/>ใช้ตำแหน่ง GPS ปัจจุบัน (แนะนำ: ยืนที่จุดลงทะเบียนแล้วกด)
+            </button>
+            <button onClick={save} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50">
+              {saved?<><ICheck sz={16} cl="inline mr-2"/>บันทึกสำเร็จ!</>:"บันทึกการตั้งค่า"}
+            </button>
+          </div>
+
+          {/* QR Code URLs */}
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6 shadow-xl">
+            <h3 className="text-white font-bold mb-1 flex items-center"><IQr sz={18} cl="text-amber-400 mr-2"/>URL สำหรับสร้าง QR Code (แต่ละหน่วยงาน)</h3>
+            <p className="text-slate-400 text-xs mb-4">นำ URL ไปสร้าง QR Code ที่ qrcode.me หรือ qr-code-generator.com</p>
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {Object.values(locs).map(l=>(
+                <div key={l.id} className="bg-slate-900/60 rounded-lg p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-emerald-400 font-bold text-xs">{l.name}</p>
+                    <p className="text-slate-400 font-mono text-xs truncate">{base}?location={l.id}</p>
+                  </div>
+                  <button onClick={()=>copyUrl(`${base}?location=${l.id}`)}
+                    className="flex-shrink-0 bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-600">
+                    คัดลอก
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 p-3 bg-slate-800/50 rounded-lg">
+              <p className="text-amber-400 font-bold text-xs mb-1">🔐 URL สำหรับ Admin</p>
+              <p className="text-slate-400 font-mono text-xs truncate">{base}?admin=1</p>
+              <button onClick={()=>copyUrl(`${base}?admin=1`)}
+                className="mt-2 bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-600">
+                คัดลอก URL Admin
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
