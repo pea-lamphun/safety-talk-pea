@@ -1,0 +1,2690 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Safety Talk - PEA Lamphun</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    .leaflet-container { background:#1e293b; }
+    .pea-marker-ring { border:3px solid #10b981; border-radius:50%; background:rgba(16,185,129,0.15); animation:pulse-ring 2s infinite; }
+    @keyframes pulse-ring { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.15);opacity:0.7} }
+
+    /* Dashboard table responsive */
+    .dash-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .dash-table { border-collapse:collapse; table-layout:fixed; width:100%; }
+    /* desktop */
+    .dash-col-name { width:130px; min-width:130px; max-width:130px; }
+    .dash-col-pos  { width:85px;  min-width:85px;  max-width:85px; }
+    .dash-col-dept { width:70px;  min-width:70px;  max-width:70px; }
+    .dash-col-pct  { width:38px;  min-width:38px; }
+    .dash-cell { width:14px; height:14px; border-radius:2px; display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:900; margin:auto; }
+    .dash-td-text  { font-size:11px; }
+    .dash-th-month { font-size:10px; padding:3px 2px; }
+    /* mobile */
+    @media (max-width:640px) {
+      .dash-col-name { width:85px;  min-width:85px;  max-width:85px; }
+      .dash-col-pos  { width:52px;  min-width:52px;  max-width:52px; }
+      .dash-col-dept { width:42px;  min-width:42px;  max-width:42px; }
+      .dash-col-pct  { width:28px;  min-width:28px; }
+      .dash-cell { width:11px; height:11px; font-size:7px; }
+      .dash-td-text  { font-size:10px; }
+      .dash-col-name { width:85px; min-width:85px; max-width:85px; }
+      .dash-col-pos  { width:52px; min-width:52px; max-width:52px; }
+      .dash-col-dept { width:42px; min-width:42px; max-width:42px; }
+      .dash-th-month { font-size:8px; padding:2px 1px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- โหลดตามลำดับ: React → Babel → SheetJS → Firebase → Init → App -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBRgmrCDHmiURSKJayo6h9yL4t3kUD5SxQ",
+      authDomain: "safety-talk-pea.firebaseapp.com",
+      projectId: "safety-talk-pea",
+      storageBucket: "safety-talk-pea.firebasestorage.app",
+      messagingSenderId: "340855934706",
+      appId: "1:340855934706:web:78f965402525bfe3390a6b"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback, useMemo } = React;
+
+    // ============ CONFIG ============
+    const IMGBB_API_KEY  = "eb2ee72c284a3fd3100d350fc1971f24";
+    const IMGBB_EXPIRE   = 7776000; // 90 วัน
+    const DEFAULT_MAX_DIST = 50;    // เมตรจริง default
+    const getMaxDist = loc => loc.maxDist || DEFAULT_MAX_DIST;
+    const TIME_START     = "08:00";
+    const TIME_END       = "09:30";
+    // Admin PIN — เปลี่ยนได้ตามต้องการ
+    const ADMIN_PIN      = "1111";
+
+    const LOCATIONS = {
+      lampun:        { id:"lampun",        name:"กฟจ.ลำพูน",         fullName:"การไฟฟ้าส่วนภูมิภาคจังหวัดลำพูน",         lat:18.5745, lng:99.0087 },
+      pasang:        { id:"pasang",        name:"กฟส.ป่าซาง",        fullName:"การไฟฟ้าส่วนภูมิภาคสาขาป่าซาง",           lat:18.5235, lng:98.9394 },
+      banhong:       { id:"banhong",       name:"กฟส.บ้านโฮ่ง",      fullName:"การไฟฟ้าส่วนภูมิภาคสาขาบ้านโฮ่ง",         lat:18.7367, lng:98.9436 },
+      li:            { id:"li",            name:"กฟส.ลี้",            fullName:"การไฟฟ้าส่วนภูมิภาคสาขาลี้",              lat:18.2773, lng:99.0534 },
+      banthi:        { id:"banthi",        name:"กฟส.บ้านธิ",        fullName:"การไฟฟ้าส่วนภูมิภาคสาขาบ้านธิ",           lat:18.4156, lng:99.1367 },
+      maeta:         { id:"maeta",         name:"กฟส.แม่ทา",         fullName:"การไฟฟ้าส่วนภูมิภาคสาขาแม่ทา",            lat:18.1856, lng:99.2678 },
+      nakornchadee:  { id:"nakornchadee",  name:"กฟส.นครเจดีย์",     fullName:"การไฟฟ้าส่วนภูมิภาคสาขานครเจดีย์",        lat:18.3456, lng:99.5134 },
+      wiangnonglong: { id:"wiangnonglong", name:"กฟส.เวียงหนองล่อง", fullName:"การไฟฟ้าส่วนภูมิภาคสาขาเวียงหนองล่อง",    lat:18.6523, lng:99.2134 },
+      thunghuachang: { id:"thunghuachang", name:"กฟส.ทุ่งหัวช้าง",   fullName:"การไฟฟ้าส่วนภูมิภาคสาขาทุ่งหัวช้าง",      lat:18.4012, lng:99.3245 },
+      maetuen:       { id:"maetuen",       name:"กฟส.แม่ตืน",        fullName:"การไฟฟ้าส่วนภูมิภาคสาขาแม่ตืน",           lat:18.1234, lng:99.4567 },
+    };
+
+    // ============ HELPERS ============
+    const calcDist = (la1,lo1,la2,lo2) => {
+      const R=6371e3,p1=la1*Math.PI/180,p2=la2*Math.PI/180,
+            dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180,
+            a=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+      return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    };
+    const withinTime = (s,e) => {
+      const n=new Date(), t=`${String(n.getHours()).padStart(2,"0")}:${String(n.getMinutes()).padStart(2,"0")}`;
+      return t>=s && t<=e;
+    };
+    const thaiDT  = d => new Date(d).toLocaleDateString("th-TH",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"});
+    const thaiD   = d => new Date(d).toLocaleDateString("th-TH",{year:"numeric",month:"short",day:"numeric"});
+    const compress = (b64,maxW=800,q=0.75) => new Promise((res,rej)=>{
+      const img=new Image();
+      img.onload=()=>{ const c=document.createElement("canvas"); let w=img.width,h=img.height; if(w>maxW){h=Math.round(h*maxW/w);w=maxW;} c.width=w;c.height=h; c.getContext("2d").drawImage(img,0,0,w,h); res(c.toDataURL("image/jpeg",q)); };
+      img.onerror=()=>rej(new Error("img")); img.src=b64;
+    });
+    const uploadImgBB = async b64 => {
+      const data=b64.includes(",")?b64.split(",")[1]:b64;
+      const f=new FormData(); f.append("key",IMGBB_API_KEY); f.append("image",data); f.append("expiration",IMGBB_EXPIRE);
+      const r=await fetch("https://api.imgbb.com/1/upload",{method:"POST",body:f});
+      const j=await r.json();
+      if(!j.success) throw new Error("ImgBB: "+JSON.stringify(j));
+      return { url:j.data.url, thumb:j.data.thumb?.url||j.data.url, del:j.data.delete_url };
+    };
+
+    // สัปดาห์นี้
+    const getWeekRange = () => {
+      const now=new Date(), day=now.getDay(), diff=day===0?-6:1-day;
+      const mon=new Date(now); mon.setDate(now.getDate()+diff); mon.setHours(0,0,0,0);
+      const sun=new Date(mon); sun.setDate(mon.getDate()+6); sun.setHours(23,59,59,999);
+      return { start:mon.toISOString().slice(0,10), end:sun.toISOString().slice(0,10) };
+    };
+    const toInputDate = iso => iso.slice(0,10);
+
+    // ============ IN-APP BROWSER DETECTION ============
+    // ============ IN-APP BROWSER AUTO-REDIRECT ============
+    (function autoRedirect() {
+      const ua = navigator.userAgent || "";
+      const url = window.location.href;
+      const isLine = /Line\//i.test(ua);
+      const isAndroid = /Android/i.test(ua);
+      const isIOS = /iPad|iPhone|iPod/.test(ua);
+      const alreadyRedirected = url.includes("openExternalBrowser=1");
+
+      if (!isLine || alreadyRedirected) return;
+
+      // LINE รองรับ parameter นี้ทั้ง iOS และ Android
+      // เมื่อเจอ openExternalBrowser=1 จะเปิด Safari/Chrome อัตโนมัติ
+      const sep = url.includes("?") ? "&" : "?";
+      window.location.replace(url + sep + "openExternalBrowser=1");
+    })();
+
+    function detectBrowser() {
+      const ua = navigator.userAgent || "";
+      // ถ้ามี openExternalBrowser=1 แสดงว่า redirect แล้ว = normal browser
+      if (window.location.href.includes("openExternalBrowser=1")) return "normal";
+      if (/Line\//i.test(ua))                                    return "line";
+      if (/FBAN|FBAV/i.test(ua))                                 return "facebook";
+      if (/Instagram/i.test(ua))                                 return "instagram";
+      if (/wv\)|; wv\)/i.test(ua) && /Android/i.test(ua))       return "webview";
+      return "normal";
+    }
+    function getChromeIntentUrl() {
+      const bare = window.location.href.replace(/^https?:\/\//, "");
+      return "intent://" + bare + "#Intent;scheme=https;package=com.android.chrome;end";
+    }
+    function copyCurrentUrl() {
+      const url = window.location.href;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url)
+          .then(() => alert("คัดลอก URL แล้ว! นำไปวางใน Chrome หรือ Safari"))
+          .catch(() => prompt("คัดลอก URL นี้:", url));
+      } else {
+        prompt("คัดลอก URL นี้:", url);
+      }
+    }
+
+    // ============ ICONS ============
+    const Ic = ({sz=20,cl="",ch}) => <svg xmlns="http://www.w3.org/2000/svg" width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cl}>{ch}</svg>;
+    const ICamera  = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>}/>;
+    const IMapPin  = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></>}/>;
+    const IClock   = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>}/>;
+    const ICheck   = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>}/>;
+    const IXCircle = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></>}/>;
+    const IAlert   = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>}/>;
+    const ICog     = p=><Ic sz={p.sz} cl={p.cl} ch={<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>}/>;
+    const IQr      = p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><rect x="13" y="13" width="2" height="2"/><rect x="16" y="16" width="2" height="2"/></>}/>;
+    const IDl      = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>}/>;
+    const IBar     = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></>}/>;
+    const IFlip    = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></>}/>;
+    const IEye     = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}/>;
+    const IFile    = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>}/>;
+    const ILock    = p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>}/>;
+    const ISpin    = p=><Ic sz={p.sz} cl={p.cl+" animate-spin"} ch={<><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>}/>;
+    const ICalendar= p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></>}/>;
+    const IFilter  = p=><Ic sz={p.sz} cl={p.cl} ch={<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>}/>;
+    const IUsers   = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>}/>;
+    const IEdit    = p=><Ic sz={p.sz} cl={p.cl} ch={<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>}/>;
+    const ITrash   = p=><Ic sz={p.sz} cl={p.cl} ch={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></>}/>;
+    const IUpload  = p=><Ic sz={p.sz} cl={p.cl} ch={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>}/>;
+    const IPlus    = p=><Ic sz={p.sz} cl={p.cl} ch={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>}/>;
+    const IChart   = p=><Ic sz={p.sz} cl={p.cl} ch={<><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></>}/>;
+    const ICalc    = p=><Ic sz={p.sz} cl={p.cl} ch={<><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></>}/>;
+
+    // ============ INPUT FIELD ============
+    const Field = ({label,name,value,onChange,required,placeholder,type="text"}) => (
+      <div>
+        <label className="block text-slate-400 text-sm font-semibold mb-1">
+          {label}{required&&<span className="text-red-400 ml-1">*</span>}
+        </label>
+        <input type={type} value={value} onChange={e=>onChange(name,e.target.value)} required={required}
+          placeholder={placeholder||""}
+          className="w-full bg-slate-900/80 border-2 border-slate-700 text-white px-4 py-2.5 rounded-lg focus:border-emerald-500 focus:outline-none transition-colors"/>
+      </div>
+    );
+
+    // ============ MAIN APP ============
+    function App() {
+      const [view,setView]         = useState("register");
+      const [adminAuth,setAdminAuth] = useState(false);
+      const [adminTab,setAdminTab] = useState("reports");
+      const [atts,setAtts]         = useState([]);
+      const [loading,setLoading]   = useState(false);
+      const [locsLoading,setLocsLoading] = useState(true); // โหลด locs จาก Firestore
+      const [curLoc,setCurLoc]     = useState("lampun");
+      const [locs,setLocs]         = useState(LOCATIONS); // เริ่มจาก default ก่อน
+
+      // โหลด locs จาก Firestore ทันทีที่เปิดแอพ (ทั้ง user และ admin)
+      useEffect(()=>{
+        const p=new URLSearchParams(window.location.search);
+        const l=p.get("location");
+        if(p.get("admin")==="1") setView("admin");
+
+        // ดึงพิกัดจาก Firestore
+        db.collection("settings").doc("locations").get()
+          .then(doc=>{
+            let merged = {...LOCATIONS};
+            if(doc.exists){
+              const saved = doc.data();
+              // merge ค่าที่บันทึกไว้เข้ากับ default (เผื่อมีหน่วยงานใหม่ใน default)
+              Object.keys(merged).forEach(id=>{
+                if(saved[id]) merged[id] = {...merged[id], ...saved[id]};
+              });
+            }
+            setLocs(merged);
+            // ตั้ง curLoc หลังจากได้ locs แล้ว
+            if(l && merged[l]) setCurLoc(l);
+          })
+          .catch(()=>{
+            // ถ้า Firestore ล้มเหลว ใช้ LOCATIONS default
+            if(l && LOCATIONS[l]) setCurLoc(l);
+          })
+          .finally(()=>setLocsLoading(false));
+      },[]);
+
+      const loc = locs[curLoc]||Object.values(locs)[0];
+
+      const addAtt = a => setAtts(prev=>[a,...prev]);
+
+      // โหลด attendances เฉพาะตอนเข้า admin
+      useEffect(()=>{
+        if(view==="admin"&&adminAuth&&atts.length===0){
+          setLoading(true);
+          db.collection("attendances").orderBy("timestamp","desc").get()
+            .then(s=>setAtts(s.docs.map(d=>({id:d.id,...d.data()}))))
+            .catch(console.error)
+            .finally(()=>setLoading(false));
+        }
+      },[view,adminAuth]);
+
+      // ---- REGISTER VIEW (ผู้ใช้ทั่วไป) ----
+      // รอโหลด locs จาก Firestore ก่อน render
+      if(locsLoading) return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+          <div className="text-center">
+            <ISpin sz={48} cl="text-emerald-400 mx-auto mb-4"/>
+            <p className="text-emerald-400 font-bold text-xl animate-pulse">กำลังโหลดข้อมูล...</p>
+            <p className="text-slate-500 text-sm mt-2">กำลังดึงพิกัดจาก Firestore ☁️</p>
+          </div>
+        </div>
+      );
+
+      if(view==="register") return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+          <div className="max-w-2xl mx-auto px-4 py-6">
+            {/* Header */}
+            <div className="flex items-center justify-center mb-6 space-x-3">
+              <div className="bg-emerald-500/20 p-2 rounded-xl"><IQr sz={28} cl="text-emerald-400"/></div>
+              <div className="text-center">
+                <h1 className="text-xl font-black text-emerald-400">Safety Talk</h1>
+                <p className="text-amber-400 font-bold text-sm">{loc.name}</p>
+              </div>
+            </div>
+
+            {/* ปุ่ม Dashboard สาธารณะ */}
+            <button onClick={()=>setView("publicdash")}
+              className="w-full mb-5 bg-gradient-to-r from-slate-700 to-slate-600 border border-emerald-500/40 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-500/10 transition-all active:scale-95">
+              <span className="text-xl">📊</span>
+              <span>ดูข้อมูลการเข้าร่วม Safety Talk</span>
+              <span className="text-emerald-400 text-xs font-black ml-1">→</span>
+            </button>
+
+            {/* In-App Browser Fallback (สำหรับ Facebook/Instagram ที่ redirect อัตโนมัติไม่ได้) */}
+            {(()=>{
+              const br = detectBrowser();
+              if(br==="normal" || br==="line") return null; // LINE จะ redirect อัตโนมัติแล้ว
+              const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+              const android = /Android/i.test(navigator.userAgent);
+              const appName = br==="facebook"?"Facebook":br==="instagram"?"Instagram":"แอพนี้";
+              return (
+                <div className="bg-red-500/15 border-2 border-red-500/50 rounded-2xl p-5 mb-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="text-3xl">🚫</span>
+                    <div>
+                      <p className="text-red-400 font-black text-base">เปิดใน {appName} ไม่รองรับกล้อง</p>
+                      <p className="text-slate-400 text-sm mt-0.5">กรุณาเปิดในเบราว์เซอร์ก่อนลงทะเบียน</p>
+                    </div>
+                  </div>
+                  {android && (
+                    <a href={getChromeIntentUrl()}
+                      className="flex items-center justify-center gap-2 w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-4 rounded-xl text-base mb-3 active:opacity-80">
+                      🌐 เปิดใน Chrome เลย
+                    </a>
+                  )}
+                  <button onClick={copyCurrentUrl}
+                    className="w-full bg-slate-700 text-white font-bold py-3 rounded-xl text-sm hover:bg-slate-600 active:bg-slate-800">
+                    📋 คัดลอก URL → เปิดใน {ios?"Safari":"Chrome"}
+                  </button>
+                  <p className="text-slate-500 text-xs text-center mt-2">
+                    กด ⋯ ในแอพ → เลือก "เปิดในเบราว์เซอร์"
+                  </p>
+                </div>
+              );
+            })()}
+
+            <RegisterForm onDone={addAtt} curLoc={curLoc} loc={loc} onOpenDash={()=>setView("publicdash")}/>
+          </div>
+        </div>
+      );
+
+      // ---- PUBLIC DASHBOARD ----
+      if(view==="publicdash") return (
+        <PublicDashboard locs={locs} atts={atts} curLoc={curLoc} onBack={()=>setView("register")}/>
+      );
+
+      // ---- ADMIN LOGIN ----
+      if(view==="admin"&&!adminAuth) return (
+        <AdminLogin onAuth={()=>setAdminAuth(true)}/>
+      );
+
+      // ---- ADMIN PANEL ----
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+          <nav className="bg-slate-900/80 backdrop-blur-lg border-b border-emerald-500/20 sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-3 py-3 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center space-x-3">
+                <div className="bg-emerald-500/20 p-2 rounded-xl"><IQr sz={26} cl="text-emerald-400"/></div>
+                <div>
+                  <h1 className="text-lg font-black text-emerald-400">Safety Talk — Admin</h1>
+                  <p className="text-slate-400 text-xs">PEA Lamphun</p>
+                </div>
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                {[
+                  ["dashboard","📊",            "Dashboard"],
+                  ["reports",  <IBar sz={16}/>,  "รายงาน"],
+                  ["members",  <IUsers sz={16}/>,"จัดการรายชื่อ"],
+                  ["settings", <ICog sz={16}/>,  "ตั้งค่า"],
+                ].map(([v,ico,lbl])=>(
+                  <button key={v} onClick={()=>setAdminTab(v)}
+                    className={`px-3 py-2 rounded-lg font-bold text-sm flex items-center gap-1 transition-all ${adminTab===v?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
+                    {ico}<span className="hidden sm:inline">{lbl}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </nav>
+          <div className="max-w-7xl mx-auto px-4 py-6">
+            {loading
+              ? <div className="flex items-center justify-center py-24"><ISpin sz={40} cl="text-emerald-400"/></div>
+              : adminTab==="dashboard"
+                ? <DashboardView atts={atts} setAtts={setAtts} locs={locs}/>
+                : adminTab==="reports"
+                  ? <ReportsView atts={atts} locs={locs}/>
+                  : adminTab==="members"
+                    ? <MembersView locs={locs}/>
+                    : <SettingsView curLoc={curLoc} setCurLoc={setCurLoc} locs={locs} setLocs={setLocs}/>
+            }
+          </div>
+        </div>
+      );
+    }
+
+    // ============ ADMIN LOGIN ============
+    function AdminLogin({ onAuth }) {
+      const [pin,setPin] = useState("");
+      const [err,setErr] = useState("");
+      const check = () => { if(pin===ADMIN_PIN){onAuth();} else {setErr("PIN ไม่ถูกต้อง");setPin("");} };
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-8 shadow-2xl w-full max-w-sm text-center">
+            <div className="inline-block bg-emerald-500/20 p-4 rounded-full mb-4"><ILock sz={40} cl="text-emerald-400"/></div>
+            <h2 className="text-2xl font-black text-white mb-2">Admin Login</h2>
+            <p className="text-slate-400 text-sm mb-6">กรอก PIN เพื่อเข้าสู่ระบบแอดมิน</p>
+            <input type="password" value={pin} onChange={e=>setPin(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&check()}
+              placeholder="PIN"
+              className="w-full bg-slate-900/80 border-2 border-slate-700 text-white px-4 py-3 rounded-lg focus:border-emerald-500 focus:outline-none text-center text-2xl tracking-widest mb-3"/>
+            {err&&<p className="text-red-400 text-sm mb-3">{err}</p>}
+            <button onClick={check}
+              className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50">
+              เข้าสู่ระบบ
+            </button>
+            <p className="text-slate-600 text-xs mt-4">เฉพาะผู้ดูแลระบบเท่านั้น</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ POSITION SORT (อ้างอิงระบบ PEA Lamphun เดิม) ============
+
+    // กลุ่มหลัก: พนักงาน=0, ลูกจ้าง=1, คนงาน=2, พขร.(บ)=3
+    function getGroup(pos) {
+      if (!pos) return 0;
+      const p = pos.trim();
+      if (p.includes("พขร."))                          return 3;
+      if (p.startsWith("คนงาน"))                       return 2;
+      if (p.startsWith("ผู้ปฏิบัติงาน"))               return 2; // คนงาน กฟส.
+      if (p.includes("ชชง") || p.includes("ชบช.") ||
+          p.includes("ชบค.") || p.includes("ชพด."))   return 1;
+      return 0; // พนักงาน
+    }
+
+    // ลำดับย่อยภายในกลุ่มคนงาน
+    const WORKER_RANK_TABLE = [
+      {match:"ก่อสร้าง 1",     rank:0},
+      {match:"ก่อสร้าง 2",     rank:1},
+      {match:"ก่อสร้าง",       rank:2},
+      {match:"ตัดกิ่งไม้",     rank:3},
+      {match:"ปรับปรุงระบบฯ",  rank:4},
+      {match:"ซ่อมย่อย (C5)",  rank:6},
+      {match:"ซ่อมย่อย",       rank:5},
+      {match:"เวรแก้ฯ",        rank:7},
+      {match:"หม้อแปลง",       rank:8},
+      {match:"มิเตอร์ฯ",       rank:9},
+      {match:"มิเตอร์",        rank:10},
+      {match:"คลังพัสดุ",      rank:11},
+      // ผู้ปฏิบัติงานระบบไฟฟ้า กฟภ. (คนงาน กฟส.)
+      {match:"ก่อสร้าง",       rank:2},
+      {match:"เวรแก้",         rank:7},
+      {match:"ซ่อมย่อย",       rank:5},
+      {match:"หม้อแปลง",       rank:8},
+      {match:"มิเตอร์",        rank:10},
+    ];
+
+    function extractNum(str) {
+      const m = str.match(/(\d+)/);
+      return m ? parseInt(m[1]) : 0;
+    }
+
+    // ลำดับตำแหน่งภายในกลุ่ม (rank ต่ำ = อยู่ก่อน, num ใช้เรียงระดับ)
+    function getPosRank(pos) {
+      if (!pos) return {rank:99, num:0};
+      const p = pos.trim();
+      // ---- บริหาร ----
+      if (p.includes("ผจก."))       return {rank:0,  num: extractNum(p)};
+      if (p.includes("รจก."))       return {rank:1,  num: extractNum(p)};
+      if (p.includes("หผ.(ฉ)"))     return {rank:2,  num: 0};
+      // ---- ตำแหน่งเฉพาะ กฟจ. ----
+      if (p.includes("นกต."))       return {rank:3,  num: extractNum(p)};
+      if (p.includes("นทน."))       return {rank:4,  num: extractNum(p)};
+      if (p.includes("ผชน."))       return {rank:5,  num: extractNum(p)};
+      if (p.includes("จป.ว."))      return {rank:6,  num: extractNum(p)};
+      // ---- หัวหน้า/ช่างแผนก ----
+      if (p.includes("หผ."))        return {rank:7,  num: 0};
+      if (p.includes("ชผ."))        return {rank:8,  num: 0};
+      if (p.includes("นพด."))       return {rank:9,  num: extractNum(p)};
+      if (p.includes("วศก."))       return {rank:10, num: extractNum(p)};
+      if (p.includes("นบช."))       return {rank:11, num: extractNum(p)};
+      if (p.includes("นบท"))        return {rank:12, num: extractNum(p)};
+      // ---- พชง./พบช. suffix พิเศษ ----
+      if (p.includes("(สข)"))       return {rank:13, num: extractNum(p)};
+      if (p.includes("(ฮล)"))       return {rank:14, num: extractNum(p)};
+      if (p.includes("(ปฟ)") && (p.includes("พชง") || p.includes("พบช")))
+                                     return {rank:15, num: extractNum(p)};
+      // ---- พชง./พบช. ทั่วไป ----
+      if (p.includes("พชง.") || p.includes("พบช."))
+                                     return {rank:16, num: extractNum(p)};
+      // ---- ลูกจ้าง ----
+      if (p.includes("ชชง.(ปฟ)"))   return {rank:20, num: 0};
+      if (p.includes("ชชง"))         return {rank:19, num: 0};
+      if (p.includes("ชบช."))        return {rank:21, num: 0};
+      if (p.includes("ชบค."))        return {rank:22, num: 0};
+      if (p.includes("ชพด."))        return {rank:23, num: 0};
+      // ---- คนงาน ----
+      if (p.startsWith("คนงาน")) {
+        let sub = 99;
+        for (const c of WORKER_RANK_TABLE) { if (p.includes(c.match)) { sub = c.rank; break; } }
+        return {rank:30, num: sub};
+      }
+      // ---- ผู้ปฏิบัติงานระบบไฟฟ้า กฟภ. (คนงาน กฟส.) ----
+      if (p.startsWith("ผู้ปฏิบัติงาน")) {
+        let sub = 50; // default
+        for (const c of WORKER_RANK_TABLE) { if (p.includes(c.match)) { sub = c.rank; break; } }
+        return {rank:30, num: sub};
+      }
+      // ---- พขร.(บ) ----
+      if (p.includes("พขร."))        return {rank:40, num: 0};
+      return {rank:98, num: extractNum(p)};
+    }
+
+    // ลำดับสังกัดหลัก กฟจ.ลำพูน
+    const DEPT_ORDER = [
+      "กฟจ.ลำพูน","ผกส.","ผปบ.","ผมต.","ผบร.","ผบส.","ผสน.","ผคพ.","ผบง.",
+      "กฟส.ป่าซาง","กฟส.บ้านโฮ่ง","กฟส.ลี้","กฟส.บ้านธิ","กฟส.แม่ทา",
+      "กฟส.นครเจดีย์","กฟส.เวียงหนองล่อง","กฟส.ทุ่งหัวช้าง","กฟส.แม่ตืน",
+      "ผปร.","ผบค.",
+    ];
+
+    function deptOrder(dept) {
+      const i = DEPT_ORDER.indexOf((dept||"").trim());
+      return i >= 0 ? i : 500;
+    }
+
+    function sortPersonnel(list) {
+      return [...list].sort((a,b)=>{
+        // 1. กลุ่มหลัก: พนักงาน → ลูกจ้าง → คนงาน → พขร.(บ)
+        const gA = getGroup(a.position), gB = getGroup(b.position);
+        if (gA !== gB) return gA - gB;
+        // 2. สังกัด/แผนก
+        const dA = deptOrder(a.department), dB = deptOrder(b.department);
+        if (dA !== dB) return dA - dB;
+        // 3. ลำดับตำแหน่งภายในสังกัด
+        const pA = getPosRank(a.position), pB = getPosRank(b.position);
+        if (pA.rank !== pB.rank) return pA.rank - pB.rank;
+        // 4. ระดับตัวเลข: ส่วนใหญ่สูงก่อน ยกเว้น คนงาน (ascending)
+        if (pA.num !== pB.num) {
+          if (pA.rank === 30) return pA.num - pB.num;
+          return pB.num - pA.num;
+        }
+        // 5. ชื่อ
+        return (a.fullName||"").localeCompare(b.fullName||"", "th");
+      });
+    }
+
+    // ============ PIN DIALOG ============
+    function PinDialog({ title, onConfirm, onCancel }) {
+      const [pin,setPin]=useState(""); const [err,setErr]=useState("");
+      const check=()=>{ if(pin===ADMIN_PIN){onConfirm();} else{setErr("PIN ไม่ถูกต้อง");setPin("");} };
+      return (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-emerald-500/30 rounded-2xl p-6 w-full max-w-xs text-center shadow-2xl">
+            <ILock sz={32} cl="text-emerald-400 mx-auto mb-3"/>
+            <p className="text-white font-bold mb-1">{title}</p>
+            <p className="text-slate-400 text-xs mb-4">กรอก PIN เพื่อยืนยัน</p>
+            <input type="password" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==="Enter"&&check()} placeholder="PIN"
+              className="w-full bg-slate-900 border-2 border-slate-700 text-white px-4 py-2.5 rounded-lg focus:border-emerald-500 focus:outline-none text-center text-xl tracking-widest mb-2"/>
+            {err&&<p className="text-red-400 text-xs mb-2">{err}</p>}
+            <div className="flex gap-2 mt-1">
+              <button onClick={onCancel} className="flex-1 bg-slate-700 text-white font-bold py-2 rounded-lg hover:bg-slate-600">ยกเลิก</button>
+              <button onClick={check} className="flex-1 bg-emerald-500 text-slate-900 font-bold py-2 rounded-lg hover:bg-emerald-400">ยืนยัน</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ MEMBERS VIEW ============
+    function MembersView({ locs }) {
+      const [selLoc,setSelLoc]   = useState("lampun");
+      const [members,setMembers] = useState([]);
+      const [loadingM,setLoadingM] = useState(false);
+      const [showForm,setShowForm] = useState(false);
+      const [editing,setEditing] = useState(null);
+      const [form,setForm]       = useState({empId:"",fullName:"",position:"",department:""});
+      const [pinFor,setPinFor]   = useState(null);
+      const [importMsg,setImportMsg] = useState("");
+      const fileRef = useRef(null);
+
+      const loadMembers = async (locId) => {
+        setLoadingM(true);
+        try {
+          const snap=await db.collection("personnel").where("locationId","==",locId).get();
+          setMembers(sortPersonnel(snap.docs.map(d=>({id:d.id,...d.data()}))));
+        } catch(e){ alert("โหลดข้อมูลไม่ได้: "+e.message); }
+        finally { setLoadingM(false); }
+      };
+
+      useEffect(()=>{ loadMembers(selLoc); },[selLoc]);
+
+      const resetForm=()=>{ setForm({empId:"",fullName:"",position:"",department:""}); setEditing(null); setShowForm(false); };
+
+      const handleSave=async()=>{
+        if(!form.fullName.trim()||!form.position.trim()||!form.department.trim()){ alert("กรุณากรอกข้อมูลที่จำเป็นให้ครบ"); return; }
+        try {
+          const data={empId:form.empId.trim()||null,fullName:form.fullName.trim(),position:form.position.trim(),department:form.department.trim(),locationId:selLoc};
+          if(editing){
+            await db.collection("personnel").doc(editing.id).update(data);
+            setMembers(prev=>sortPersonnel(prev.map(m=>m.id===editing.id?{...m,...data}:m)));
+          } else {
+            const ref=await db.collection("personnel").add(data);
+            setMembers(prev=>sortPersonnel([...prev,{id:ref.id,...data}]));
+          }
+          resetForm();
+        } catch(e){ alert("บันทึกไม่สำเร็จ: "+e.message); }
+      };
+
+      const handleDelete=async(member)=>{
+        try {
+          await db.collection("personnel").doc(member.id).delete();
+          setMembers(prev=>prev.filter(m=>m.id!==member.id));
+          setPinFor(null);
+        } catch(e){ alert("ลบไม่สำเร็จ: "+e.message); }
+      };
+
+      const formRef = useRef(null);
+      const handleEdit=(member)=>{
+        setEditing(member);
+        setForm({empId:member.empId||"",fullName:member.fullName,position:member.position,department:member.department});
+        setShowForm(true); setPinFor(null);
+        // scroll ไปที่ form หลัง render
+        setTimeout(()=>{ formRef.current?.scrollIntoView({behavior:"smooth",block:"start"}); },80);
+      };
+
+      const handleImport=(e)=>{
+        const file=e.target.files[0]; if(!file) return;
+        const reader=new FileReader();
+        reader.onload=async(ev)=>{
+          try {
+            setImportMsg("กำลังอ่านไฟล์...");
+            const wb=XLSX.read(ev.target.result,{type:"array"});
+            const ws=wb.Sheets[wb.SheetNames[0]];
+            const rows=XLSX.utils.sheet_to_json(ws,{header:1});
+            if(rows.length<2){ setImportMsg("ไม่พบข้อมูลในไฟล์"); return; }
+            const headers=rows[0].map(h=>(h||"").toString().toLowerCase().trim());
+            const findCol=(...keys)=>{ for(const k of keys){ const i=headers.findIndex(h=>h.includes(k)); if(i>=0) return i; } return -1; };
+            const colId=findCol("รหัส","id","emp");
+            const colName=findCol("ชื่อ","name","fullname");
+            const colPos=findCol("ตำแหน่ง","position","pos");
+            const colDept=findCol("สังกัด","แผนก","dept","department");
+            if(colName<0){ setImportMsg("ไม่พบคอลัมน์ชื่อในไฟล์"); return; }
+            const toImport=[];
+            for(let i=1;i<rows.length;i++){
+              const row=rows[i];
+              const name=(row[colName]||"").toString().trim();
+              if(!name) continue;
+              toImport.push({ empId:colId>=0?(row[colId]||"").toString().trim()||null:null, fullName:name, position:colPos>=0?(row[colPos]||"").toString().trim():"", department:colDept>=0?(row[colDept]||"").toString().trim():"", locationId:selLoc });
+            }
+            if(toImport.length===0){ setImportMsg("ไม่พบข้อมูลรายชื่อในไฟล์"); return; }
+            setImportMsg("กำลังนำเข้า "+toImport.length+" รายชื่อ...");
+            const batch=db.batch();
+            const newDocs=[];
+            for(const item of toImport){ const ref=db.collection("personnel").doc(); batch.set(ref,item); newDocs.push({id:ref.id,...item}); }
+            await batch.commit();
+            setMembers(prev=>sortPersonnel([...prev,...newDocs]));
+            setImportMsg("นำเข้าสำเร็จ "+toImport.length+" รายชื่อ ✅");
+            setTimeout(()=>setImportMsg(""),4000);
+          } catch(err){ setImportMsg("เกิดข้อผิดพลาด: "+err.message); }
+        };
+        reader.readAsArrayBuffer(file);
+        e.target.value="";
+      };
+
+      const loc=locs[selLoc]||Object.values(locs)[0];
+
+      return (
+        <div className="max-w-5xl mx-auto space-y-5">
+          {pinFor&&(
+            <PinDialog
+              title={pinFor.action==="delete"?"ลบรายชื่อ: "+pinFor.target.fullName:"แก้ไขรายชื่อ: "+pinFor.target.fullName}
+              onConfirm={()=>{ if(pinFor.action==="delete") handleDelete(pinFor.target); else handleEdit(pinFor.target); }}
+              onCancel={()=>setPinFor(null)}
+            />
+          )}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h2 className="text-xl font-black text-white mb-4 flex items-center"><IUsers sz={22} cl="text-emerald-400 mr-2"/>จัดการรายชื่อบุคลากร</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-3">
+              {Object.values(locs).map(l=>(
+                <button key={l.id} onClick={()=>setSelLoc(l.id)}
+                  className={`px-3 py-2 rounded-xl font-bold text-xs transition-all text-center ${selLoc===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700 text-slate-300 hover:bg-slate-600"}`}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+            <div className="p-3 bg-slate-900/50 rounded-lg flex items-center justify-between">
+              <div><p className="text-emerald-400 font-bold text-sm">{loc.name}</p><p className="text-slate-400 text-xs">{loc.fullName} — {members.length} คน</p></div>
+            </div>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <button onClick={()=>{ resetForm(); setShowForm(true); }} className="flex items-center gap-2 bg-emerald-500 text-slate-900 font-bold px-5 py-2.5 rounded-xl hover:shadow-lg hover:shadow-emerald-500/50">
+              <IPlus sz={16}/>เพิ่มรายชื่อ
+            </button>
+            <button onClick={()=>fileRef.current?.click()} className="flex items-center gap-2 bg-blue-500/20 text-blue-400 font-bold px-5 py-2.5 rounded-xl hover:bg-blue-500/30 border border-blue-500/30">
+              <IUpload sz={16}/>นำเข้าจาก Excel
+            </button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImport}/>
+            {importMsg&&<p className="text-sm text-emerald-400 font-semibold flex items-center">{importMsg}</p>}
+          </div>
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-xs text-slate-400">
+            <p className="text-blue-400 font-bold mb-1">📋 รูปแบบไฟล์ Excel ที่รองรับ</p>
+            <p>แถวแรก = Header: <span className="text-white font-mono">รหัส | ชื่อ-นามสกุล | ตำแหน่ง | สังกัด</span> (ระบบจะหาคอลัมน์อัตโนมัติ)</p>
+          </div>
+          {showForm&&(
+            <div ref={formRef} className="bg-slate-800/50 border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+              <h3 className="text-white font-bold mb-4">{editing?"✏️ แก้ไขรายชื่อ":"เพิ่มรายชื่อใหม่"}</h3>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {[["รหัสพนักงาน","empId","เว้นว่างได้",false],["ชื่อ-นามสกุล","fullName","ชื่อ นามสกุล",true],["ตำแหน่ง","position","เช่น พชง.3, ชชง",true],["สังกัด / แผนก","department","เช่น ผกส., ผปบ.",true]].map(([lbl,key,ph,req])=>(
+                  <div key={key}>
+                    <label className="block text-slate-400 text-xs font-semibold mb-1">{lbl}{req&&<span className="text-red-400 ml-1">*</span>}</label>
+                    <input value={form[key]} onChange={e=>setForm(prev=>({...prev,[key]:e.target.value}))} placeholder={ph}
+                      className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none text-sm"/>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={resetForm} className="flex-1 bg-slate-700 text-white font-bold py-2 rounded-lg hover:bg-slate-600">ยกเลิก</button>
+                <button onClick={handleSave} className="flex-1 bg-emerald-500 text-slate-900 font-bold py-2 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50">{editing?"บันทึกการแก้ไข":"เพิ่มรายชื่อ"}</button>
+              </div>
+            </div>
+          )}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl shadow-xl overflow-hidden">
+            {loadingM
+              ?<div className="flex justify-center py-16"><ISpin sz={36} cl="text-emerald-400"/></div>
+              :members.length===0
+                ?<div className="text-center py-16 text-slate-500"><IUsers sz={40} cl="mx-auto mb-3 opacity-40"/><p>ยังไม่มีรายชื่อ</p><p className="text-xs mt-1">กดเพิ่มรายชื่อ หรือนำเข้าจาก Excel</p></div>
+                :<div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-800/80">
+                      <tr>{["#","รหัส","ชื่อ-นามสกุล","ตำแหน่ง","สังกัด",""].map(h=>(
+                        <th key={h} className="px-4 py-3 text-left text-emerald-400 font-bold whitespace-nowrap">{h}</th>
+                      ))}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/50">
+                      {members.map((m,i)=>(
+                        <tr key={m.id} className="hover:bg-slate-700/30 transition-colors">
+                          <td className="px-4 py-3 text-slate-500">{i+1}</td>
+                          <td className="px-4 py-3 text-slate-400 font-mono text-xs">{m.empId||"-"}</td>
+                          <td className="px-4 py-3 text-white font-medium">{m.fullName}</td>
+                          <td className="px-4 py-3 text-slate-300">{m.position}</td>
+                          <td className="px-4 py-3 text-slate-300">{m.department}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1.5">
+                              <button onClick={()=>setPinFor({action:"edit",target:m})} className="bg-blue-500/20 text-blue-400 p-1.5 rounded-lg hover:bg-blue-500/30"><IEdit sz={13}/></button>
+                              <button onClick={()=>setPinFor({action:"delete",target:m})} className="bg-red-500/20 text-red-400 p-1.5 rounded-lg hover:bg-red-500/30"><ITrash sz={13}/></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+            }
+          </div>
+        </div>
+      );
+    }
+
+    // ============ REGISTER FORM ============
+    function RegisterForm({ onDone, curLoc, loc, onOpenDash }) {
+      const [step,setStep]       = useState("form"); // form | photo | submitting | success | error
+      const [form,setForm]       = useState({ empId:"", fullName:"", position:"", department:"" });
+      const [autoFilled,setAutoFilled] = useState(false);
+      const [searching,setSearching]   = useState(false);
+      const [photo,setPhoto]     = useState(null);
+      const [camMode,setCamMode] = useState("environment");
+      const [camOpen,setCamOpen] = useState(false);
+      const [camErr,setCamErr]   = useState(null); // null | "permission" | "notfound" | "other"
+      const [err,setErr]         = useState("");
+      const [saveMsg,setSaveMsg] = useState("");
+      const [savedAtt,setSavedAtt] = useState(null);
+      const [locData,setLocData] = useState(null);
+      const vidRef=useRef(null); const canRef=useRef(null); const stRef=useRef(null);
+
+      const setF = (k,v) => { setForm(prev=>({...prev,[k]:v})); if(k==="empId") setAutoFilled(false); };
+
+      const lookupEmpId = useCallback(async (val) => {
+        const q=val.trim();
+        if(!q||q.length<2) return;
+        setSearching(true);
+        try {
+          const snap=await db.collection("personnel").where("locationId","==",curLoc).get();
+          const found=snap.docs.map(d=>d.data()).find(d=>
+            (d.empId&&d.empId.toString().trim()===q) ||
+            (d.empId&&d.empId.toString().replace(/\D/g,"")===q.replace(/\D/g,""))
+          );
+          if(found){
+            setForm(prev=>({...prev,fullName:found.fullName||"",position:found.position||"",department:found.department||""}));
+            setAutoFilled(true);
+          }
+        } catch(e){ /* lookup failed silently */ }
+        finally { setSearching(false); }
+      },[curLoc]);
+
+      const startCam = useCallback(async mode=>{
+        if(stRef.current) stRef.current.getTracks().forEach(t=>t.stop());
+        setCamErr(null); // เคลียร์ error เก่า
+        const fm = mode||camMode;
+
+        const tryOpen = async(constraints) => {
+          const st = await navigator.mediaDevices.getUserMedia(constraints);
+          stRef.current = st;
+          if(vidRef.current){
+            vidRef.current.srcObject = st;
+            await new Promise(res => {
+              vidRef.current.onloadedmetadata = () => { vidRef.current.play(); res(); };
+              setTimeout(res, 2000);
+            });
+            if(vidRef.current.readyState < 2){
+              await new Promise(res => setTimeout(res, 500));
+              vidRef.current.play().catch(()=>{});
+            }
+          }
+          setCamOpen(true);
+        };
+
+        // ลอง 3 ระดับ: exact → normal → ไม่ระบุ facingMode
+        try {
+          await tryOpen({ video:{ facingMode:{ exact: fm } }, audio:false });
+        } catch(e1){
+          try {
+            await tryOpen({ video:{ facingMode: fm }, audio:false });
+          } catch(e2){
+            try {
+              await tryOpen({ video:true, audio:false });
+            } catch(e3){
+              // จำแนกประเภท error เพื่อแสดงคำแนะนำที่ตรงจุด
+              const msg = (e3.name||"") + (e3.message||"");
+              if(e3.name==="NotAllowedError" || msg.includes("Permission") || msg.includes("denied")){
+                setCamErr("permission");
+              } else if(e3.name==="NotFoundError" || msg.includes("not found") || msg.includes("Requested device")){
+                setCamErr("notfound");
+              } else {
+                setCamErr("other");
+              }
+            }
+          }
+        }
+      },[camMode]);
+
+      const stopCam = () => { if(stRef.current){stRef.current.getTracks().forEach(t=>t.stop());stRef.current=null;} setCamOpen(false); };
+
+      const capture = async () => {
+        const v=vidRef.current,c=canRef.current; if(!v||!c) return;
+        c.width=v.videoWidth; c.height=v.videoHeight; c.getContext("2d").drawImage(v,0,0);
+        stopCam(); setPhoto(await compress(c.toDataURL("image/jpeg",0.92),800,0.78));
+      };
+
+      const flip = () => { const m=camMode==="environment"?"user":"environment"; setCamMode(m); startCam(m); };
+
+      const handleSubmit = async () => {
+        setStep("submitting"); setErr("");
+        setSaveMsg("กำลังตรวจสอบเวลา...");
+        const tStart = loc.timeStart||TIME_START;
+        const tEnd   = loc.timeEnd||TIME_END;
+        if(!withinTime(tStart,tEnd)){
+          setErr(`ลงทะเบียนได้เฉพาะเวลา ${tStart} - ${tEnd} น.`); setStep("error"); return;
+        }
+        setSaveMsg("กำลังตรวจสอบตำแหน่ง GPS...");
+        if(!navigator.geolocation){ setErr("เบราว์เซอร์ไม่รองรับ GPS"); setStep("error"); return; }
+        navigator.geolocation.getCurrentPosition(async pos=>{
+          const dist=calcDist(pos.coords.latitude,pos.coords.longitude,loc.lat,loc.lng);
+          const maxDist = getMaxDist(loc);
+          const displayDist = loc.displayDist || 20;
+          if(dist>maxDist){
+            setErr(`คุณอยู่ห่างจากจุดกิจกรรม ${dist.toFixed(0)} เมตร (อนุญาตไม่เกิน ${displayDist} เมตร)`);
+            setStep("error"); return;
+          }
+          const ld={lat:pos.coords.latitude,lng:pos.coords.longitude,distance:dist.toFixed(1)};
+          try {
+            setSaveMsg("กำลังอัปโหลดรูปไป ImgBB...");
+            const img=await uploadImgBB(photo);
+            setSaveMsg("กำลังบันทึกข้อมูล...");
+            const att={
+              empId:      form.empId.trim()||null,
+              fullName:   form.fullName.trim(),
+              position:   form.position.trim(),
+              department: form.department.trim(),
+              timestamp:  new Date().toISOString(),
+              location:   ld,
+              locationId: curLoc,
+              locationName:loc.name,
+              photoURL:   img.url,
+              photoThumb: img.thumb,
+              distance:   ld.distance,
+            };
+            const ref=await db.collection("attendances").add(att);
+            const full={id:ref.id,...att};
+            onDone(full); setLocData(ld); setSavedAtt(full); setStep("success");
+          } catch(e){ setErr("เกิดข้อผิดพลาด: "+e.message); setStep("error"); }
+        }, err=>{
+          // แยก error code เพื่อแสดง popup แนะนำวิธีแก้ที่ตรงจุด
+          if(err.code===1) {
+            // PERMISSION_DENIED — ผู้ใช้กด "ไม่อนุญาต"
+            setErr("PERMISSION_DENIED");
+          } else if(err.code===2) {
+            // POSITION_UNAVAILABLE — GPS ปิดหรือหาตำแหน่งไม่ได้
+            setErr("POSITION_UNAVAILABLE");
+          } else {
+            // TIMEOUT
+            setErr("TIMEOUT");
+          }
+          setStep("gps_error");
+        }, {enableHighAccuracy:true,timeout:15000});
+      };
+
+      const reset = () => {
+        setStep("form"); setForm({empId:"",fullName:"",position:"",department:""});
+        setAutoFilled(false); setPhoto(null); setErr(""); setSavedAtt(null); setLocData(null); stopCam();
+      };
+
+      // ── FORM STEP ──
+      if(step==="form") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-6 shadow-2xl">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center space-x-2 bg-emerald-500/20 border border-emerald-500/40 px-5 py-2.5 rounded-xl">
+              <IMapPin sz={18} cl="text-emerald-400"/>
+              <div className="text-left">
+                <div className="text-emerald-400 font-black leading-tight">{loc.name}</div>
+                <div className="text-slate-400 text-xs">{loc.fullName}</div>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {/* รหัสพนักงาน — auto-fill */}
+            <div>
+              <label className="block text-slate-400 text-sm font-semibold mb-1">รหัสพนักงาน / ลูกจ้าง</label>
+              <div className="relative">
+                <input value={form.empId} onChange={e=>setF("empId",e.target.value)}
+                  onBlur={e=>lookupEmpId(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&lookupEmpId(e.target.value)}
+                  placeholder="หากไม่มีรหัส ให้ใส่เบอร์โทรศัพท์"
+                  className={`w-full bg-slate-900/80 border-2 text-white px-4 py-2.5 rounded-lg focus:outline-none transition-colors ${autoFilled?"border-emerald-500":"border-slate-700 focus:border-emerald-500"}`}/>
+                {searching&&<ISpin sz={16} cl="absolute right-3 top-3 text-emerald-400"/>}
+                {autoFilled&&<span className="absolute right-3 top-3 text-emerald-400 text-xs font-bold">✓ ดึงข้อมูลแล้ว</span>}
+              </div>
+              {!autoFilled&&<p className="text-slate-500 text-xs mt-1">พิมพ์รหัสแล้วกด Enter หรือแตะนอกช่อง ระบบจะดึงข้อมูลให้อัตโนมัติ</p>}
+            </div>
+            {/* ชื่อ-นามสกุล */}
+            <div>
+              <label className="block text-slate-400 text-sm font-semibold mb-1">ชื่อ-นามสกุล<span className="text-red-400 ml-1">*</span></label>
+              <input value={form.fullName} onChange={e=>setF("fullName",e.target.value)}
+                readOnly={autoFilled} placeholder="เช่น นาย ชื่อ-นามสกุล"
+                className={`w-full border-2 text-white px-4 py-2.5 rounded-lg focus:outline-none transition-colors ${autoFilled?"bg-slate-800/50 border-emerald-500/40 text-slate-300 cursor-not-allowed":"bg-slate-900/80 border-slate-700 focus:border-emerald-500"}`}/>
+            </div>
+            {/* ตำแหน่ง */}
+            <div>
+              <label className="block text-slate-400 text-sm font-semibold mb-1">ตำแหน่ง<span className="text-red-400 ml-1">*</span></label>
+              <input value={form.position} onChange={e=>setF("position",e.target.value)}
+                readOnly={autoFilled} placeholder="เช่น พชง.3, ชชง, คนงาน"
+                className={`w-full border-2 text-white px-4 py-2.5 rounded-lg focus:outline-none transition-colors ${autoFilled?"bg-slate-800/50 border-emerald-500/40 text-slate-300 cursor-not-allowed":"bg-slate-900/80 border-slate-700 focus:border-emerald-500"}`}/>
+            </div>
+            {/* สังกัด */}
+            <div>
+              <label className="block text-slate-400 text-sm font-semibold mb-1">สังกัด / แผนก<span className="text-red-400 ml-1">*</span></label>
+              <input value={form.department} onChange={e=>setF("department",e.target.value)}
+                readOnly={autoFilled} placeholder="เช่น ผกส., ผปบ., ผมต."
+                className={`w-full border-2 text-white px-4 py-2.5 rounded-lg focus:outline-none transition-colors ${autoFilled?"bg-slate-800/50 border-emerald-500/40 text-slate-300 cursor-not-allowed":"bg-slate-900/80 border-slate-700 focus:border-emerald-500"}`}/>
+            </div>
+            {/* ปุ่มปลดล็อก */}
+            {autoFilled&&(
+              <button type="button" onClick={()=>setAutoFilled(false)}
+                className="w-full bg-slate-700/60 border border-slate-600 text-slate-400 text-xs font-semibold py-2 rounded-lg hover:bg-slate-700 hover:text-white transition-colors flex items-center justify-center gap-1.5">
+                <ILock sz={12}/>ข้อมูลถูกล็อกอัตโนมัติ — กดที่นี่เพื่อแก้ไข
+              </button>
+            )}
+          </div>
+          <div className="mt-4 bg-slate-900/50 border border-slate-700 rounded-lg p-3 text-xs text-slate-400 space-y-1">
+            <p className="text-slate-300 font-semibold flex items-center"><IAlert sz={13} cl="text-yellow-400 mr-1.5"/>เงื่อนไขการลงทะเบียน</p>
+            <p className="flex items-center"><IClock sz={12} cl="text-emerald-400 mr-1.5"/>เวลา {loc.timeStart||TIME_START} - {loc.timeEnd||TIME_END} น.</p>
+            <p className="flex items-center"><IMapPin sz={12} cl="text-emerald-400 mr-1.5"/>ต้องอยู่ภายในรัศมี {loc.displayDist||20} เมตร จากจุดลงทะเบียน</p>
+            <p className="flex items-center"><ICamera sz={12} cl="text-emerald-400 mr-1.5"/>ต้องถ่ายรูปยืนยันตัวตน</p>
+          </div>
+          <button
+            onClick={()=>{
+              if(!form.fullName.trim()||!form.position.trim()||!form.department.trim()){
+                alert("กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบ"); return;
+              }
+              setStep("photo");
+            }}
+            className="mt-4 w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-4 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50 text-lg">
+            ถัดไป → ถ่ายรูปยืนยันตัวตน
+          </button>
+        </div>
+      );
+
+      // ── PHOTO STEP ──
+      if(step==="photo") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-6 shadow-2xl">
+          <div className="text-center mb-5">
+            <h2 className="text-xl font-black text-white mb-1">ถ่ายรูปยืนยันตัวตน</h2>
+            <p className="text-emerald-400 text-sm font-semibold">{form.fullName}</p>
+            <p className="text-slate-400 text-xs">{form.position} • {form.department}</p>
+          </div>
+          <div className="space-y-3">
+            {/* Camera permission error popup */}
+            {camErr && (
+              <div className="bg-red-500/10 border-2 border-red-500/40 rounded-xl p-5 space-y-3">
+                <p className="text-red-400 font-black text-base flex items-center gap-2">
+                  <span className="text-2xl">📵</span>
+                  {camErr==="permission" ? "ยังไม่ได้อนุญาตให้เข้าถึงกล้อง"
+                  :camErr==="notfound"   ? "ไม่พบกล้องบนอุปกรณ์นี้"
+                  :                       "ไม่สามารถเปิดกล้องได้"}
+                </p>
+
+                {camErr==="permission" && (
+                  <div className="space-y-2 text-sm">
+                    <p className="text-white font-bold">วิธีเปิดอนุญาตกล้อง:</p>
+                    <div className="bg-slate-900/60 rounded-lg p-3 space-y-1.5 text-slate-300">
+                      <p className="text-emerald-400 font-bold">🤖 Android (Samsung / ทั่วไป)</p>
+                      <p>1. กดปุ่ม <span className="text-white font-bold">⋮ (สามจุด)</span> มุมขวาบนของเบราว์เซอร์</p>
+                      <p>2. เลือก <span className="text-white font-bold">การตั้งค่า → การอนุญาตไซต์</span></p>
+                      <p>3. กด <span className="text-white font-bold">กล้อง → อนุญาต</span></p>
+                      <p>4. กลับมาที่หน้านี้แล้วกด <span className="text-white font-bold">"ลองใหม่"</span></p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-3 space-y-1.5 text-slate-300 mt-2">
+                      <p className="text-emerald-400 font-bold">🔒 วิธีเร็วกว่า (Android Chrome)</p>
+                      <p>1. กดไอคอน <span className="text-white font-bold">🔒 หรือ ⓘ</span> ซ้ายของ address bar</p>
+                      <p>2. กด <span className="text-white font-bold">สิทธิ์ → กล้อง → อนุญาต</span></p>
+                      <p>3. กด <span className="text-white font-bold">"ลองใหม่"</span> ด้านล่าง</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-3 space-y-1.5 text-slate-300 mt-2">
+                      <p className="text-sky-400 font-bold">📱 iPhone (Safari)</p>
+                      <p>1. เปิด <span className="text-white font-bold">การตั้งค่า → Safari → กล้อง</span></p>
+                      <p>2. เลือก <span className="text-white font-bold">"อนุญาต"</span></p>
+                      <p>3. กลับมา Refresh หน้านี้ แล้วลองใหม่</p>
+                    </div>
+                  </div>
+                )}
+
+                {camErr==="notfound" && (
+                  <p className="text-slate-300 text-sm">อุปกรณ์นี้ไม่มีกล้อง หรือกล้องถูกปิดใช้งานอยู่ กรุณาใช้สมาร์ทโฟนที่มีกล้องแทนครับ</p>
+                )}
+
+                {camErr==="other" && (
+                  <div className="text-sm text-slate-300 space-y-2">
+                    <p>กล้องไม่สามารถเปิดได้ในขณะนี้ ลองวิธีนี้ได้เลย:</p>
+                    <div className="bg-slate-900/60 rounded-lg p-3 space-y-1.5">
+                      <p className="text-white font-bold">วิธีที่ 1 (ง่ายที่สุด)</p>
+                      <p>กด <span className="text-white font-bold">"ลองใหม่"</span> ด้านล่าง 1-2 ครั้ง มักจะหายเองครับ</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-3 space-y-1.5">
+                      <p className="text-white font-bold">วิธีที่ 2 (ถ้ายังไม่ได้)</p>
+                      <p>กด Home แล้วกลับมาที่หน้านี้ใหม่ โดยไม่ต้องปิดแอพใดๆ</p>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-3 space-y-1.5">
+                      <p className="text-white font-bold">วิธีที่ 3 (ถ้ายังไม่ได้)</p>
+                      <p>Refresh หน้าเว็บ (กดปุ่ม 🔄 ในเบราว์เซอร์) แล้วเริ่มลงทะเบียนใหม่</p>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={()=>{ setCamErr(null); startCam(); }}
+                  className="w-full bg-emerald-500 text-slate-900 font-black py-3 rounded-lg hover:bg-emerald-400 mt-2">
+                  🔄 ลองใหม่อีกครั้ง
+                </button>
+              </div>
+            )}
+
+            {!photo && !camOpen && !camErr && (
+              <button onClick={()=>startCam()}
+                className="w-full bg-slate-700 border-2 border-slate-600 text-white font-bold py-5 rounded-lg hover:bg-slate-600 flex items-center justify-center text-lg">
+                <ICamera sz={22} cl="mr-3"/>เปิดกล้องถ่ายรูป
+              </button>
+            )}
+            {camOpen && !photo && (
+              <div className="space-y-2">
+                <div className="relative bg-black rounded-xl overflow-hidden">
+                  <video ref={vidRef} autoPlay playsInline muted className="w-full h-auto" onCanPlay={e=>e.target.play()}/>
+                  <div className="absolute inset-0 border-4 border-emerald-500/40 rounded-xl pointer-events-none"/>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-40 h-52 border-4 border-emerald-400/60 rounded-full"/>
+                  </div>
+                  <button onClick={flip} className="absolute top-3 right-3 bg-slate-900/80 text-white p-2.5 rounded-xl border border-emerald-500/30 text-lg leading-none" title="สลับกล้อง">
+                    📷
+                  </button>
+                  <div className="absolute bottom-2 left-0 right-0 flex justify-center">
+                    <span className="text-white text-xs bg-slate-900/80 px-3 py-1 rounded-full">
+                      {camMode==="environment"?"📷 กล้องหลัง — กด 📷 เพื่อสลับกล้องหน้า":"📷 กล้องหน้า — กด 📷 เพื่อสลับกล้องหลัง"}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex space-x-3">
+                  <button onClick={()=>{stopCam();setStep("form");}} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-lg hover:bg-slate-600">← กลับ</button>
+                  <button onClick={capture} className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg">
+                    <ICamera sz={18} cl="inline mr-2"/>ถ่ายรูป
+                  </button>
+                </div>
+              </div>
+            )}
+            {photo && (
+              <div className="space-y-3">
+                <div className="relative rounded-xl overflow-hidden">
+                  <img src={photo} alt="preview" className="w-full h-auto rounded-xl"/>
+                  <div className="absolute top-3 right-3 bg-emerald-500/90 text-slate-900 px-3 py-1 rounded-full text-sm font-bold">✓ ถ่ายแล้ว</div>
+                </div>
+                <div className="flex space-x-3">
+                  <button onClick={()=>{setPhoto(null);startCam();}} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-lg">ถ่ายใหม่</button>
+                  <button onClick={handleSubmit} className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg">
+                    ยืนยันลงทะเบียน →
+                  </button>
+                </div>
+              </div>
+            )}
+            <canvas ref={canRef} className="hidden"/>
+          </div>
+        </div>
+      );
+
+      // ── SUBMITTING ──
+      if(step==="submitting") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-10 shadow-2xl text-center">
+          <ISpin sz={56} cl="text-emerald-400 mx-auto mb-5"/>
+          <p className="text-white font-bold text-lg mb-1">กำลังดำเนินการ...</p>
+          <p className="text-emerald-400 text-sm">{saveMsg}</p>
+          <p className="text-slate-500 text-xs mt-2">กรุณาอย่าปิดหน้าจอ</p>
+        </div>
+      );
+
+      // ── SUCCESS ──
+      if(step==="success") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="inline-block bg-emerald-500/20 p-6 rounded-full mb-5"><ICheck sz={60} cl="text-emerald-400"/></div>
+          <h2 className="text-3xl font-black text-white mb-2">ลงทะเบียนสำเร็จ!</h2>
+          <p className="text-emerald-400 font-bold mb-5">บันทึกข้อมูลและรูปภาพเรียบร้อยแล้ว</p>
+          <div className="bg-slate-900/50 rounded-xl p-5 mb-5 text-left space-y-2 text-sm">
+            <p><span className="text-slate-500">ชื่อ-นามสกุล:</span> <span className="text-white font-bold">{savedAtt?.fullName}</span></p>
+            <p><span className="text-slate-500">ตำแหน่ง:</span> <span className="text-white">{savedAtt?.position}</span></p>
+            <p><span className="text-slate-500">สังกัด:</span> <span className="text-white">{savedAtt?.department}</span></p>
+            <p><span className="text-slate-500">หน่วยงาน:</span> <span className="text-emerald-400 font-bold">{loc.name}</span></p>
+
+            <p><span className="text-slate-500">เวลา:</span> <span className="text-white">{thaiDT(new Date())}</span></p>
+            {savedAtt?.photoURL&&<img src={savedAtt.photoURL} alt="saved" className="w-full max-h-48 object-cover rounded-lg mt-2 border border-emerald-500/30"/>}
+          </div>
+          <button onClick={reset} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-4 rounded-lg text-lg mb-3">
+            ลงทะเบียนคนถัดไป
+          </button>
+          <button onClick={onOpenDash}
+            className="w-full bg-slate-700/80 border border-emerald-500/30 text-emerald-400 font-bold py-3 rounded-lg flex items-center justify-center gap-2 hover:bg-slate-700 hover:border-emerald-500/60 transition-all active:scale-95">
+            <span className="text-lg">📊</span>
+            <span>ดูสถานะการเข้าร่วมของฉัน</span>
+            <span className="text-xs font-black ml-1">→</span>
+          </button>
+        </div>
+      );
+
+      // ── GPS ERROR (popup แนะนำวิธีแก้) ──
+      if(step==="gps_error") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-amber-500/30 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="text-6xl mb-4">📍</div>
+          <h2 className="text-2xl font-black text-white mb-2">
+            {err==="PERMISSION_DENIED" ? "ยังไม่ได้อนุญาตให้เข้าถึงพิกัด" :
+             err==="POSITION_UNAVAILABLE" ? "ไม่สามารถระบุตำแหน่งได้" :
+             "หมดเวลาค้นหาตำแหน่ง"}
+          </h2>
+          <p className="text-amber-400 font-bold mb-6">
+            {err==="PERMISSION_DENIED" ? "กรุณาอนุญาตการเข้าถึงตำแหน่ง แล้วลองใหม่" :
+             err==="POSITION_UNAVAILABLE" ? "กรุณาเปิด GPS แล้วลองใหม่" :
+             "GPS ตอบสนองช้า กรุณาลองใหม่อีกครั้ง"}
+          </p>
+
+          {/* คำแนะนำตามประเภท error */}
+          <div className="bg-slate-900/60 rounded-xl p-5 mb-6 text-left space-y-3">
+            {err==="PERMISSION_DENIED" && <>
+              <p className="text-white font-bold text-sm mb-3">วิธีเปิดอนุญาตพิกัด:</p>
+              <div className="space-y-2 text-sm text-slate-300">
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-emerald-400 font-bold mb-1">📱 iPhone (iOS)</p>
+                  <p>การตั้งค่า → Privacy & Security → Location Services → Safari / Chrome → เลือก <span className="text-white font-bold">"While Using"</span></p>
+                </div>
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-emerald-400 font-bold mb-1">🤖 Android</p>
+                  <p>การตั้งค่า → แอป → Chrome/Browser → สิทธิ์ → ตำแหน่ง → เลือก <span className="text-white font-bold">"อนุญาต"</span></p>
+                </div>
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-amber-400 font-bold mb-1">🌐 หรือทำในเบราว์เซอร์</p>
+                  <p>กดไอคอน 🔒 หรือ ⓘ ที่ address bar → กด <span className="text-white font-bold">"Location → Allow"</span> → Refresh หน้า</p>
+                </div>
+              </div>
+            </>}
+
+            {err==="POSITION_UNAVAILABLE" && <>
+              <p className="text-white font-bold text-sm mb-3">วิธีแก้ไข:</p>
+              <div className="space-y-2 text-sm text-slate-300">
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-emerald-400 font-bold mb-1">📱 iPhone</p>
+                  <p>การตั้งค่า → Privacy & Security → Location Services → <span className="text-white font-bold">เปิดสวิตช์</span></p>
+                </div>
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-emerald-400 font-bold mb-1">🤖 Android</p>
+                  <p>แถบแจ้งเตือนด้านบน → กด <span className="text-white font-bold">ไอคอน GPS</span> ให้ติดสว่าง หรือการตั้งค่า → ตำแหน่ง → เปิด</p>
+                </div>
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-amber-400 font-bold mb-1">💡 เพิ่มเติม</p>
+                  <p>ลองออกไปที่โล่งแจ้งสักครู่ แล้วลองใหม่ เพราะในอาคาร GPS อาจจับสัญญาณได้ยาก</p>
+                </div>
+              </div>
+            </>}
+
+            {err==="TIMEOUT" && <>
+              <p className="text-white font-bold text-sm mb-3">วิธีแก้ไข:</p>
+              <div className="space-y-2 text-sm text-slate-300">
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-amber-400 font-bold mb-1">💡 สาเหตุ</p>
+                  <p>GPS กำลังค้นหาสัญญาณ อาจช้าในครั้งแรกหรือเมื่ออยู่ในอาคาร</p>
+                </div>
+                <div className="bg-slate-800/60 rounded-lg p-3">
+                  <p className="text-emerald-400 font-bold mb-1">✅ วิธีแก้</p>
+                  <p>กด <span className="text-white font-bold">"ลองใหม่"</span> สัก 1-2 ครั้ง หรือลองย้ายไปที่โล่งแจ้งแล้วลองใหม่</p>
+                </div>
+              </div>
+            </>}
+          </div>
+
+          <button onClick={()=>{ setStep("photo"); setErr(""); }}
+            className="w-full bg-gradient-to-r from-amber-500 to-orange-500 text-slate-900 font-black py-4 rounded-lg hover:shadow-lg hover:shadow-amber-500/50 text-lg mb-3">
+            ลองใหม่อีกครั้ง
+          </button>
+          <button onClick={reset} className="w-full bg-slate-700 text-white font-bold py-3 rounded-lg hover:bg-slate-600 text-sm">
+            กลับไปหน้าแรก
+          </button>
+        </div>
+      );
+
+      // ── ERROR ──
+      if(step==="error") return (
+        <div className="bg-slate-800/50 backdrop-blur-lg border border-red-500/30 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="inline-block bg-red-500/20 p-6 rounded-full mb-5"><IXCircle sz={60} cl="text-red-400"/></div>
+          <h2 className="text-2xl font-black text-white mb-3">ไม่สามารถลงทะเบียนได้</h2>
+          <p className="text-red-400 mb-6 font-semibold">{err}</p>
+          <button onClick={reset} className="w-full bg-slate-700 text-white font-bold py-4 rounded-lg hover:bg-slate-600">ลองใหม่อีกครั้ง</button>
+        </div>
+      );
+      return null;
+    }
+
+    // ============ PUBLIC DASHBOARD (read-only, ไม่ต้อง login) ============
+    function PublicDashboard({ locs, atts, curLoc, onBack }) {
+      const [selLoc,setSelLoc]       = useState(curLoc);
+      const [members,setMembers]     = useState([]);
+      const [safeDates,setSafeDates] = useState([]);
+      const [overrides,setOverrides] = useState({});
+      const [loadingD,setLoadingD]   = useState(false);
+
+      const loadAll = async (locId) => {
+        setLoadingD(true);
+        try {
+          const [snapP, docSD, docOV] = await Promise.all([
+            db.collection("personnel").where("locationId","==",locId).get(),
+            db.collection("settings").doc("safetydates").get(),
+            db.collection("overrides").doc(locId).get(),
+          ]);
+          setMembers(sortPersonnel(snapP.docs.map(d=>({id:d.id,...d.data()}))));
+          const sd = docSD.exists ? (docSD.data()[locId]||[]) : [];
+          setSafeDates(sd.sort());
+          const ov = docOV.exists ? docOV.data() : {};
+          setOverrides(ov);
+        } catch(e){ console.error(e); }
+        finally { setLoadingD(false); }
+      };
+
+      useEffect(()=>{ loadAll(selLoc); },[selLoc]);
+
+      const memberKey = m => m.empId ? m.empId : m.id;
+
+      const attOnDate = (m, date) => atts.some(a=>{
+        if(a.locationId!==selLoc) return false;
+        if(a.timestamp.slice(0,10)!==date) return false;
+        if(m.empId&&a.empId&&m.empId.toString().trim()===a.empId.toString().trim()) return true;
+        if(a.fullName&&m.fullName&&a.fullName.trim()===m.fullName.trim()) return true;
+        return false;
+      });
+
+      const getCellStatus = (m, date) => {
+        const key = memberKey(m)+"_"+date;
+        const v = overrides[key];
+        if(v==="P"||v==="O"||v==="E") return v;
+        if(isFuture(date)) return "F";
+        return attOnDate(m,date)?"P":"O";
+      };
+
+      const calcPct = (m) => {
+        let p=0,total=0;
+        safeDates.forEach(d=>{ const s=getCellStatus(m,d); if(s!=="E"&&s!=="F"){total++;if(s==="P")p++;} });
+        return total===0?null:Math.round(p/total*100);
+      };
+
+      const fmtDate = (iso) => {
+        const d=new Date(iso+"T00:00:00");
+        const mo=["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+        return d.getDate()+"\n"+mo[d.getMonth()];
+      };
+
+      const cellBg  = s => s==="P"?"bg-emerald-500":s==="E"?"bg-slate-600":s==="F"?"bg-slate-700/50":"bg-red-500/80";
+      const cellTxt = s => s==="P"?"✓":s==="E"?"–":s==="F"?"·":"✗";
+
+      // คนนอกฐานข้อมูล
+      const pubOutsiders = useMemo(()=>{
+        const seen=new Set(), list=[];
+        safeDates.forEach(d=>{
+          atts.filter(a=>{
+            if(a.locationId!==selLoc||a.timestamp.slice(0,10)!==d) return false;
+            return !members.some(m=>{
+              if(m.empId&&a.empId&&m.empId.toString().trim()===a.empId.toString().trim()) return true;
+              if(a.fullName&&m.fullName&&a.fullName.trim()===m.fullName.trim()) return true;
+              return false;
+            });
+          }).forEach(a=>{ const key=(a.empId||"")+"__"+(a.fullName||""); if(!seen.has(key)){seen.add(key);list.push(a);} });
+        });
+        return list;
+      },[atts,members,safeDates,selLoc]);
+
+      const pubOutsiderDates = useMemo(()=>{
+        const result={};
+        safeDates.forEach(d=>{ result[d]=atts.filter(a=>{
+          if(a.locationId!==selLoc||a.timestamp.slice(0,10)!==d) return false;
+          return !members.some(m=>{
+            if(m.empId&&a.empId&&m.empId.toString().trim()===a.empId.toString().trim()) return true;
+            if(a.fullName&&m.fullName&&a.fullName.trim()===m.fullName.trim()) return true;
+            return false;
+          });
+        }); });
+        return result;
+      },[atts,members,safeDates,selLoc]);
+
+      // Export PDF (PublicDashboard)
+      const exportPDF = () => {
+        const locName = locs[selLoc]?.name || selLoc;
+        const locFull = locs[selLoc]?.fullName || "";
+        const MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+        const fmtMon = iso => { const d=new Date(iso+"T00:00:00"); return MONTHS[d.getMonth()]+" "+(d.getFullYear()+543); };
+        const groups=[]; let cur=null;
+        safeDates.forEach(d=>{ const mo=d.slice(0,7); if(!cur||cur.mo!==mo){cur={mo,label:fmtMon(d),count:1};groups.push(cur);}else cur.count++; });
+        const bgColor = s => s==="P"?"#22c55e":s==="E"?"#64748b":s==="F"?"#334155":"#ef4444";
+        const fgColor = s => s==="E"||s==="F"?"#94a3b8":"#fff";
+        const cellChar = s => s==="P"?"✓":s==="E"?"–":s==="F"?"·":"✗";
+        const allRows = [
+          ...members.map(m=>({
+            name: m.fullName, pos: m.position, dept: m.department,
+            cells: safeDates.map(d=>getCellStatus(m,d)), pct: calcPct(m),
+          })),
+          ...(pubOutsiders.length>0?[{name:"⚠️ คนนอกฐานข้อมูล",pos:"",dept:"",cells:null,pct:null,isSep:true}]:[]),
+          ...pubOutsiders.map(a=>({
+            name: a.fullName||"—", pos: a.position||"—", dept: a.department||"—",
+            cells: safeDates.map(d=>(pubOutsiderDates[d]||[]).some(x=>{
+              if(a.empId&&x.empId&&a.empId.toString().trim()===x.empId.toString().trim()) return true;
+              if(a.fullName&&x.fullName&&a.fullName.trim()===x.fullName.trim()) return true;
+              return false;
+            })?"P":"F"),
+            pct: null, isOutsider: true,
+          })),
+        ];
+        const rowsHtml = allRows.map((r,i)=>{
+          if(r.isSep) return `<tr style="background:#7c3aed20"><td colspan="${4+safeDates.length+1}" style="padding:4px 8px;font-weight:bold;color:#f59e0b;font-size:12px">⚠️ พบ ${pubOutsiders.length} คน ที่ลงทะเบียนแต่ยังไม่อยู่ในฐานข้อมูล</td></tr>`;
+          const rowBg = r.isOutsider?"#7c3aed10":i%2===0?"#1e293b":"#0f172a";
+          const cellsHtml = r.cells?r.cells.map(s=>`<td class="c" style="background:${bgColor(s)};color:${fgColor(s)};width:13px;min-width:13px;max-width:13px">${cellChar(s)}</td>`).join(""):safeDates.map(()=>`<td class="c" style="width:13px;min-width:13px;max-width:13px;background:#1e293b"></td>`).join("");
+          const pctColor = r.pct===null?"#64748b":r.pct>=80?"#22c55e":r.pct>=50?"#f59e0b":"#ef4444";
+          return `<tr style="background:${rowBg}"><td class="n" style="color:${r.isOutsider?"#fcd34d":"#f1f5f9"}">${r.name}</td><td class="p">${r.pos}</td><td class="d">${r.dept}</td>${cellsHtml}<td class="pct" style="color:${pctColor}">${r.pct!==null?r.pct+"%":"—"}</td></tr>`;
+        }).join("");
+        const monthHeaderHtml = groups.map(g=>`<th colspan="${g.count}" style="text-align:center;color:#34d399;font-size:9px;padding:3px 2px;border-left:1px solid #334155">${g.label}</th>`).join("");
+        const dateHeaderHtml = safeDates.map(d=>`<th style="text-align:center;font-size:8px;color:#94a3b8;padding:2px 1px;border-left:1px solid #1e293b;width:11px;min-width:11px;max-width:11px;writing-mode:vertical-lr;transform:rotate(180deg)">${d.slice(5).replace("-","/")} </th>`).join("");
+        const now=new Date(); const thaiDate=now.getDate()+" "+MONTHS[now.getMonth()]+" "+(now.getFullYear()+543);
+        const html=`<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8"><title>Safety Talk — ${locName}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:'Sarabun','TH Sarabun New',sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:0}h1{text-align:center;font-size:22px;margin:0 0 4px;color:#34d399;font-weight:bold}h2{text-align:center;font-size:17px;margin:0 0 4px;color:#ffffff;font-weight:bold}.meta{text-align:center;font-size:12px;color:#94a3b8;margin-bottom:10px}table{border-collapse:collapse;width:100%;table-layout:fixed}thead{background:#0f172a}th{background:#1e293b;color:#94a3b8;font-size:11px;padding:4px;border:1px solid #334155}td.n{padding:4px 6px;font-size:13px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f1f5f9}td.p{padding:4px 5px;font-size:12px;white-space:nowrap;color:#e2e8f0}td.d{padding:4px 5px;font-size:12px;white-space:nowrap;color:#cbd5e1}td.c{text-align:center;padding:2px;font-weight:bold;font-size:11px;border:1px solid #475569}td.pct{text-align:center;font-weight:bold;font-size:13px;border-left:2px solid #f59e0b80;padding:4px 5px}tbody tr td{border-bottom:1px solid #1e293b}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><h1>รายงานผลการเข้าร่วมกิจกรรม Safety Talk</h1><h2>${locName} — ${locFull}</h2><div class="meta">พิมพ์เมื่อ ${thaiDate} • ${members.length} คน • ${safeDates.length} วันกิจกรรม</div><table><thead><tr><th style="width:160px" rowspan="2">ชื่อ-นามสกุล</th><th style="width:85px" rowspan="2">ตำแหน่ง</th><th style="width:65px" rowspan="2">แผนก</th>${monthHeaderHtml}<th style="width:38px;border-left:2px solid #f59e0b80;text-align:center;color:#f59e0b" rowspan="2">%</th></tr><tr>${dateHeaderHtml}</tr></thead><tbody>${rowsHtml}</tbody></table><div style="margin-top:10px;font-size:11px;color:#94a3b8;display:flex;gap:16px"><span><span style="background:#22c55e;color:#fff;padding:2px 7px;border-radius:3px;font-weight:bold">✓</span> เข้าร่วม</span><span><span style="background:#ef4444;color:#fff;padding:2px 7px;border-radius:3px;font-weight:bold">✗</span> ไม่เข้าร่วม</span><span><span style="background:#64748b;color:#94a3b8;padding:2px 7px;border-radius:3px;font-weight:bold">–</span> ยกเว้น</span><span><span style="background:#334155;color:#94a3b8;padding:2px 7px;border-radius:3px;font-weight:bold">·</span> ยังไม่ถึงวันกิจกรรม</span></div></body></html>`;
+        const w=window.open("","_blank","width=1000,height=700");
+        if(!w){alert("กรุณาอนุญาต Pop-up สำหรับเว็บนี้ก่อนครับ");return;}
+        w.document.write(html); w.document.close();
+        w.onload=()=>{w.focus();w.print();};
+      };
+
+      const loc = locs[selLoc]||Object.values(locs)[0];
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+          <div className="max-w-7xl mx-auto px-3 py-4">
+
+            {/* Header bar */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <button onClick={onBack}
+                  className="bg-slate-700 text-white font-bold px-4 py-2 rounded-xl hover:bg-slate-600 text-sm flex items-center gap-2 active:scale-95">
+                  ← กลับ
+                </button>
+                <div>
+                  <h1 className="text-lg font-black text-emerald-400">📊 ข้อมูลการเข้าร่วม Safety Talk</h1>
+                  <p className="text-slate-400 text-xs">ดูได้อย่างเดียว — ปี {new Date().getFullYear()+543}</p>
+                </div>
+              </div>
+              <button onClick={exportPDF}
+                className="flex items-center gap-1.5 bg-red-500/20 text-red-400 font-bold px-4 py-2 rounded-xl hover:bg-red-500/30 border border-red-500/30 text-sm active:scale-95">
+                📄 Export PDF
+              </button>
+            </div>
+
+            {/* เลือกหน่วยงาน */}
+            <div className="bg-slate-800/50 border border-emerald-500/20 rounded-2xl p-4 mb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-3">
+                {Object.values(locs).map(l=>(
+                  <button key={l.id} onClick={()=>setSelLoc(l.id)}
+                    className={`px-3 py-2 rounded-xl font-bold text-xs transition-all text-center ${selLoc===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700 text-slate-300 hover:bg-slate-600"}`}>
+                    {l.name}
+                  </button>
+                ))}
+              </div>
+              <div className="p-2 bg-slate-900/50 rounded-lg flex items-center justify-between">
+                <div>
+                  <p className="text-emerald-400 font-bold text-sm">{loc.name}</p>
+                  <p className="text-slate-400 text-xs">{loc.fullName} — {members.length} คน • {safeDates.length} วันกิจกรรม</p>
+                </div>
+              </div>
+            </div>
+
+            {/* คำอธิบาย */}
+            <div className="bg-slate-800/30 border border-slate-700 rounded-xl p-3 mb-4 flex flex-wrap gap-4 text-xs text-slate-400">
+              <span className="flex items-center gap-1"><span className="bg-emerald-500 text-white font-black w-6 h-6 rounded flex items-center justify-center text-xs">✓</span> เข้าร่วม</span>
+              <span className="flex items-center gap-1"><span className="bg-red-500/80 text-white font-black w-6 h-6 rounded flex items-center justify-center text-xs">✗</span> ไม่เข้าร่วม</span>
+              <span className="flex items-center gap-1"><span className="bg-slate-600 text-slate-400 font-black w-6 h-6 rounded flex items-center justify-center text-xs">–</span> ยกเว้น</span>
+              <span className="text-emerald-400 font-semibold">%</span><span>= เปอร์เซ็นต์การเข้าร่วมสะสมทั้งปี</span>
+            </div>
+
+            {/* ตาราง */}
+            {loadingD
+              ?<div className="flex justify-center py-24"><ISpin sz={40} cl="text-emerald-400"/></div>
+              :members.length===0||safeDates.length===0
+                ?<div className="text-center py-20 text-slate-500 bg-slate-800/30 rounded-2xl">
+                  <p className="text-3xl mb-3">📋</p>
+                  <p className="text-lg font-bold">{members.length===0?"ยังไม่มีรายชื่อบุคลากร":"ยังไม่มีวันกิจกรรม"}</p>
+                  <p className="text-sm mt-1 text-slate-600">ติดต่อแอดมินเพื่อตั้งค่าข้อมูล</p>
+                </div>
+                :(
+                <div className="bg-slate-800/50 border border-emerald-500/30 rounded-2xl shadow-2xl overflow-hidden">
+                  <div className="dash-table-wrap">
+                    <table className="text-xs dash-table">
+                      <thead>
+                        <tr className="bg-slate-900/80">
+                          <th className="px-1 py-2 text-left text-slate-300 font-bold sticky left-0 bg-slate-900 z-10 border-r border-slate-700 dash-col-name" rowSpan="2">ชื่อ</th>
+                          <th className="px-1 py-2 text-left text-slate-300 font-bold sticky bg-slate-900 z-10 border-r border-slate-700 dash-col-pos" rowSpan="2" style={{left:"130px"}}>ตำแหน่ง</th>
+                          <th className="px-1 py-2 text-left text-slate-300 font-bold sticky bg-slate-900 z-10 border-r border-slate-700 dash-col-dept" rowSpan="2" style={{left:"215px"}}>แผนก</th>
+                          {(()=>{
+                            const groups=[];
+                            let cur=null;
+                            safeDates.forEach(d=>{ const mo=d.slice(0,7); if(!cur||cur.mo!==mo){cur={mo,count:1};groups.push(cur);}else cur.count++; });
+                            const MN=["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+                            return groups.map(g=>(
+                              <th key={g.mo} colSpan={g.count} className="dash-th-month text-center text-emerald-400 font-bold border-l border-slate-700 bg-slate-900/60" style={{fontSize:"9px",padding:"2px 1px"}}>
+                                {MN[parseInt(g.mo.slice(5))-1]} {parseInt(g.mo.slice(0,4))+543}
+                              </th>
+                            ));
+                          })()}
+                          <th className="px-1 py-2 text-center text-amber-400 font-bold border-l-2 border-amber-500/40 sticky right-0 bg-slate-900 z-10 dash-col-pct" rowSpan="2">%</th>
+                        </tr>
+                        <tr className="bg-slate-900/60">
+                          {safeDates.map(d=>(
+                            <th key={d} className="text-center border-l border-slate-700 text-slate-400 font-semibold" style={{padding:"2px 0",lineHeight:"1"}}>
+                              <span style={{fontSize:"9px"}}>{new Date(d+"T00:00:00").getDate()}</span>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-700/30">
+                        {members.map((m,i)=>{
+                          const pct=calcPct(m);
+                          return (
+                            <tr key={m.id} className={`${i%2===0?"bg-slate-800/20":"bg-slate-900/20"}`}>
+                              <td className="px-1 py-1 text-white font-medium sticky left-0 bg-inherit z-10 border-r border-slate-700/50 overflow-hidden dash-col-name dash-td-text">
+                                <div className="truncate dash-td-text">{m.fullName}</div>
+                              </td>
+                              <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-inherit z-10 border-r border-slate-700/50 overflow-hidden dash-col-pos dash-td-text" style={{left:"130px"}}>
+                                {m.position}
+                              </td>
+                              <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-inherit z-10 border-r border-slate-700/50 overflow-hidden dash-col-dept dash-td-text" style={{left:"215px"}}>
+                                {m.department}
+                              </td>
+                              {safeDates.map(d=>{
+                                const s=getCellStatus(m,d);
+                                return (
+                                  <td key={d} className="text-center border-l border-slate-700/30" style={{padding:"1px 0"}}>
+                                    <div className={`dash-cell ${cellBg(s)} ${s==="E"||s==="F"?"text-slate-400":"text-white"}`}>
+                                      {cellTxt(s)}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                              <td className="px-1 py-1 text-center font-black border-l-2 border-amber-500/40 sticky right-0 bg-inherit z-10 text-xs dash-col-pct"
+                                style={{color:pct===null?"#64748b":pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444"}}>
+                                {pct===null?"—":pct+"%"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {/* แถวสรุปรวมรายวัน */}
+                        {members.length>0 && (
+                          <tr className="bg-slate-700/40 font-bold border-t-2 border-slate-500">
+                            <td className="px-1 py-1.5 text-emerald-400 font-black sticky left-0 bg-slate-700/60 z-10 border-r border-slate-600 dash-col-name" style={{fontSize:"10px"}}>รวม</td>
+                            <td className="px-1 py-1 sticky bg-slate-700/60 z-10 border-r border-slate-600 dash-col-pos" style={{left:"130px"}}></td>
+                            <td className="px-1 py-1 sticky bg-slate-700/60 z-10 border-r border-slate-600 dash-col-dept" style={{left:"215px"}}></td>
+                            {safeDates.map(d=>{
+                              const isFut = isFuture(d);
+                              if(isFut) return <td key={d} className="text-center border-l border-slate-600" style={{padding:"1px 0"}}><span style={{fontSize:"8px",color:"#334155",fontWeight:"900"}}>·</span></td>;
+                              let p=0,total=0;
+                              members.forEach(m=>{ const s=getCellStatus(m,d); if(s!=="E"&&s!=="F"){total++;if(s==="P")p++;} });
+                              const pct=total>0?Math.round(p/total*100):null;
+                              return (
+                                <td key={d} className="text-center border-l border-slate-600" style={{padding:"1px 0"}}>
+                                  <span style={{fontSize:"8px",fontWeight:"900",color:pct===null?"#64748b":pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",display:"block",lineHeight:"1.2"}}>
+                                    {pct===null?"—":pct+"%"}
+                                  </span>
+                                </td>
+                              );
+                            })}
+                            <td className="px-1 py-1 text-center sticky right-0 bg-slate-700/60 z-10 border-l-2 border-amber-500/40 dash-col-pct">
+                              {(()=>{
+                                let tp=0,tt=0;
+                                members.forEach(m=>{ const pct=calcPct(m); if(pct!==null){tp+=pct;tt++;} });
+                                return tt>0?<span style={{fontSize:"10px",fontWeight:"900",color:"#f59e0b"}}>{Math.round(tp/tt)}%</span>:<span style={{color:"#64748b"}}>—</span>;
+                              })()}
+                            </td>
+                          </tr>
+                        )}
+                        {/* แถวคนนอกฐานข้อมูล */}
+                        {pubOutsiders.length>0 && (
+                          <>
+                            <tr className="bg-amber-500/10 border-t-2 border-amber-500/30">
+                              <td colSpan={3+safeDates.length+1} className="px-3 py-2 text-amber-400 font-bold text-xs">
+                                ⚠️ พบ {pubOutsiders.length} คน ที่ลงทะเบียนแต่ยังไม่อยู่ในฐานข้อมูล
+                              </td>
+                            </tr>
+                            {pubOutsiders.map((a,i)=>(
+                              <tr key={a.id||i} className="bg-amber-500/5">
+                                <td className="px-1 py-1 text-amber-300 font-medium sticky left-0 bg-amber-500/5 z-10 border-r border-amber-500/20 overflow-hidden dash-col-name dash-td-text">
+                                  {a.fullName||"—"}
+                                  {a.empId&&<span className="text-slate-500 text-xs ml-1">({a.empId})</span>}
+                                </td>
+                                <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-amber-500/5 z-10 border-r border-amber-500/20 overflow-hidden dash-col-pos dash-td-text" style={{left:"130px"}}>
+                                  {a.position||"—"}
+                                </td>
+                                <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-amber-500/5 z-10 border-r border-amber-500/20 overflow-hidden dash-col-dept dash-td-text" style={{left:"215px"}}>
+                                  {a.department||"—"}
+                                </td>
+                                {safeDates.map(d=>{
+                                  const hit=(pubOutsiderDates[d]||[]).some(x=>{
+                                    if(a.empId&&x.empId&&a.empId.toString().trim()===x.empId.toString().trim()) return true;
+                                    if(a.fullName&&x.fullName&&a.fullName.trim()===x.fullName.trim()) return true;
+                                    return false;
+                                  });
+                                  return (
+                                    <td key={d} className="text-center border-l border-amber-500/10 p-0.5">
+                                      {hit
+                                        ?<div className="w-7 h-6 rounded text-xs font-black flex items-center justify-center mx-auto bg-amber-500/70 text-white">✓</div>
+                                        :<div className="w-7 h-6 rounded text-xs flex items-center justify-center mx-auto bg-slate-800/40 text-slate-600">·</div>
+                                      }
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-2 py-2 text-center text-slate-600 text-xs border-l-2 border-amber-500/40 sticky right-0 bg-amber-500/5 z-10">—</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            }
+
+            {/* footer กลับ */}
+            <div className="mt-6 text-center">
+              <button onClick={onBack} className="bg-slate-700 text-white font-bold px-8 py-3 rounded-xl hover:bg-slate-600 active:scale-95">
+                ← กลับหน้าลงทะเบียน
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // วันนี้ในรูป ISO string YYYY-MM-DD
+    const TODAY = new Date().toISOString().slice(0,10);
+    const isFuture = (date) => date > TODAY;
+
+    // ============ DASHBOARD VIEW ============
+    // เก็บวันที่กิจกรรม: settings/safetydates → { lampun: ["2025-01-06",...], ... }
+    // เก็บ override:     overrides/{locId}   → { "key_date": "P"|"O"|"E" }
+    // key = empId ถ้ามี ไม่งั้นใช้ fullName
+
+    function DashboardView({ atts, setAtts, locs }) {
+      const [selLoc,setSelLoc]         = useState("lampun");
+      const [members,setMembers]       = useState([]);
+      const [safeDates,setSafeDates]   = useState({}); // {locId: ["2025-01-06",...]}
+      const [overrides,setOverrides]   = useState({}); // {locId: {"key_date":"P"|"O"|"E"}}
+      const [loadingD,setLoadingD]     = useState(false);
+      const [showAddDate,setShowAddDate] = useState(false);
+      const [newDate,setNewDate]       = useState("");
+      const [savingDate,setSavingDate] = useState(false);
+      const [pinFor,setPinFor]         = useState(null); // {type:"deldate"}
+      const [copying,setCopying]       = useState(false);
+      const [copyMsg,setCopyMsg]       = useState("");
+
+      // โหลด personnel + safedates + overrides
+      const loadAll = async (locId) => {
+        setLoadingD(true);
+        try {
+          const [snapP, docSD, docOV] = await Promise.all([
+            db.collection("personnel").where("locationId","==",locId).get(),
+            db.collection("settings").doc("safetydates").get(),
+            db.collection("overrides").doc(locId).get(),
+          ]);
+          setMembers(sortPersonnel(snapP.docs.map(d=>({id:d.id,...d.data()}))));
+          const sd = docSD.exists ? (docSD.data()[locId]||[]) : [];
+          setSafeDates(prev=>({...prev,[locId]: sd.sort()}));
+          const ov = docOV.exists ? docOV.data() : {};
+          setOverrides(prev=>({...prev,[locId]: ov}));
+        } catch(e){ alert("โหลดข้อมูลไม่ได้: "+e.message); }
+        finally { setLoadingD(false); }
+      };
+
+      useEffect(()=>{ loadAll(selLoc); },[selLoc]);
+
+      const dates = (safeDates[selLoc]||[]);
+      const ov    = overrides[selLoc]||{};
+
+      // หา key สำหรับ member (ใช้ empId ถ้ามี ไม่งั้นใช้ id)
+      const memberKey = m => m.empId ? m.empId : m.id;
+
+      // ตรวจว่า member ลงทะเบียนในวันนั้นไหม (จาก atts)
+      const attOnDate = (m, date) => {
+        return atts.some(a => {
+          if(a.locationId !== selLoc) return false;
+          if(a.timestamp.slice(0,10) !== date) return false;
+          if(m.empId && a.empId && m.empId.toString().trim() === a.empId.toString().trim()) return true;
+          if(a.fullName && m.fullName && a.fullName.trim() === m.fullName.trim()) return true;
+          return false;
+        });
+      };
+
+      // สถานะของแต่ละ cell: "P"=เข้าร่วม "O"=ไม่เข้าร่วม "E"=ยกเว้น "F"=อนาคต
+      const getCellStatus = (m, date) => {
+        const key = memberKey(m)+"_"+date;
+        const manualVal = ov[key];
+        // override มีสิทธิ์สูงสุด (แม้แต่วันอนาคต)
+        if(manualVal === "P") return "P";
+        if(manualVal === "O") return "O";
+        if(manualVal === "E") return "E";
+        // วันในอนาคต — ยังไม่ถึง ไม่นับ
+        if(isFuture(date)) return "F";
+        return attOnDate(m, date) ? "P" : "O";
+      };
+
+      // คำนวณ % (ไม่นับ E และ F)
+      const calcPct = (m) => {
+        let p=0, total=0;
+        dates.forEach(d=>{
+          const s = getCellStatus(m,d);
+          if(s==="E"||s==="F") return;
+          total++;
+          if(s==="P") p++;
+        });
+        if(total===0) return null;
+        return Math.round(p/total*100);
+      };
+
+      // สรุปรวม (ไม่นับ E และ F)
+      const calcDateSummary = (date) => {
+        if(isFuture(date)) return null;
+        let p=0, total=0;
+        members.forEach(m=>{
+          const s = getCellStatus(m,date);
+          if(s!=="E"&&s!=="F"){ total++; if(s==="P") p++; }
+        });
+        return total>0 ? Math.round(p/total*100) : null;
+      };
+
+      // cycle cell: auto→P, P→O, O→E, E→auto(ลบ override)
+      const cycleCell = (m, date) => {
+        const cur = getCellStatus(m, date);
+        const key = memberKey(m)+"_"+date;
+        let next;
+        if(!ov[key]) { next = cur==="P"?"O":"P"; }
+        else if(ov[key]==="P") next = "O";
+        else if(ov[key]==="O") next = "E";
+        else next = null; // E → auto
+        applyOverride(key, next); // ไม่ต้องใส่ PIN แล้ว
+      };
+
+      const applyOverride = async (key, val) => {
+        const locId = selLoc;
+        const newOv = {...(overrides[locId]||{})};
+        if(val===null) delete newOv[key];
+        else newOv[key] = val;
+        try {
+          await db.collection("overrides").doc(locId).set(newOv);
+          setOverrides(prev=>({...prev,[locId]:newOv}));
+        } catch(e){ alert("บันทึกไม่ได้: "+e.message); }
+      };
+
+      // เพิ่มวัน
+      const addDate = async () => {
+        if(!newDate){ alert("กรุณาเลือกวันที่"); return; }
+        if(dates.includes(newDate)){ alert("วันที่นี้มีอยู่แล้ว"); return; }
+        setSavingDate(true);
+        try {
+          const docSD = await db.collection("settings").doc("safetydates").get();
+          const cur = docSD.exists ? (docSD.data()||{}) : {};
+          const updated = {...cur, [selLoc]: [...(cur[selLoc]||[]), newDate].sort()};
+          await db.collection("settings").doc("safetydates").set(updated);
+          setSafeDates(prev=>({...prev,[selLoc]:updated[selLoc]}));
+          setNewDate(""); setShowAddDate(false);
+        } catch(e){ alert("เพิ่มวันไม่ได้: "+e.message); }
+        finally { setSavingDate(false); }
+      };
+
+      // ลบวัน
+      const deleteDate = async (date) => {
+        try {
+          const docSD = await db.collection("settings").doc("safetydates").get();
+          const cur = docSD.exists ? (docSD.data()||{}) : {};
+          const updated = {...cur, [selLoc]: (cur[selLoc]||[]).filter(d=>d!==date)};
+          await db.collection("settings").doc("safetydates").set(updated);
+          setSafeDates(prev=>({...prev,[selLoc]:updated[selLoc]}));
+          // ลบ overrides ที่เกี่ยวกับวันนี้ด้วย
+          const locOv = {...(overrides[selLoc]||{})};
+          Object.keys(locOv).forEach(k=>{ if(k.endsWith("_"+date)) delete locOv[k]; });
+          await db.collection("overrides").doc(selLoc).set(locOv);
+          setOverrides(prev=>({...prev,[selLoc]:locOv}));
+          setPinFor(null);
+        } catch(e){ alert("ลบวันไม่ได้: "+e.message); }
+      };
+
+      // export Excel
+      const exportExcel = () => {
+        const rows = members.map(m=>{
+          const row = { "แผนก": m.department, "ชุดงาน": m.position, "ชื่อ-นามสกุล": m.fullName };
+          dates.forEach(d=>{
+            const s = getCellStatus(m,d);
+            const label = d.slice(5).replace("-","/"); // MM/DD
+            row[label] = s==="P"?"P":s==="E"?"E":"O";
+          });
+          const pct = calcPct(m);
+          row["%เข้าร่วม"] = pct!==null ? pct/100 : "";
+          return row;
+        });
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, locs[selLoc]?.name||selLoc);
+        XLSX.writeFile(wb, `safety-talk-dashboard-${selLoc}-${new Date().getFullYear()}.xlsx`);
+      };
+
+      // Export PDF — ใช้ browser print window
+      const exportPDF = () => {
+        const locName = locs[selLoc]?.name || selLoc;
+        const locFull = locs[selLoc]?.fullName || "";
+        const MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+        const fmtD = iso => { const d=new Date(iso+"T00:00:00"); return d.getDate()+"<br>"+MONTHS[d.getMonth()]; };
+        const fmtMon = iso => { const d=new Date(iso+"T00:00:00"); return MONTHS[d.getMonth()]+" "+(d.getFullYear()+543); };
+
+        // group dates by month for header
+        const groups=[]; let cur=null;
+        dates.forEach(d=>{ const mo=d.slice(0,7); if(!cur||cur.mo!==mo){cur={mo,label:fmtMon(d),count:1};groups.push(cur);}else cur.count++; });
+
+        // cell color
+        const bgColor = s => s==="P"?"#22c55e":s==="E"?"#64748b":s==="F"?"#334155":"#ef4444";
+        const fgColor = s => s==="E"||s==="F"?"#94a3b8":"#fff";
+        const cellChar = s => s==="P"?"✓":s==="E"?"–":s==="F"?"·":"✗";
+
+        // all rows (members + outsiders)
+        const allRows = [
+          ...members.map(m=>({
+            name: m.fullName+(m.empId?" ("+m.empId+")":""),
+            pos: m.position, dept: m.department,
+            cells: dates.map(d=>getCellStatus(m,d)),
+            pct: calcPct(m),
+          })),
+          ...(outsiderList.length>0 ? [{name:"⚠️ คนนอกฐานข้อมูล", pos:"", dept:"", cells:null, pct:null, isSep:true}] : []),
+          ...outsiderList.map(a=>({
+            name: (a.fullName||"—")+(a.empId?" ("+a.empId+")":""),
+            pos: a.position||"—", dept: a.department||"—",
+            cells: dates.map(d=>{
+              const hit=(getOutsiders[d]||[]).some(x=>{
+                if(a.empId&&x.empId&&a.empId.toString().trim()===x.empId.toString().trim()) return true;
+                if(a.fullName&&x.fullName&&a.fullName.trim()===x.fullName.trim()) return true;
+                return false;
+              });
+              return hit?"P":"F";
+            }),
+            pct: null, isOutsider: true,
+          })),
+        ];
+
+        // build table rows HTML
+        const rowsHtml = allRows.map((r,i)=>{
+          if(r.isSep) return `<tr style="background:#7c3aed20"><td colspan="${4+dates.length+1}" style="padding:4px 8px;font-weight:bold;color:#f59e0b;font-size:12px">⚠️ พบ ${outsiderList.length} คน ที่ลงทะเบียนแต่ยังไม่อยู่ในฐานข้อมูล</td></tr>`;
+          const rowBg = r.isOutsider ? "#7c3aed10" : i%2===0?"#1e293b":"#0f172a";
+          const cellsHtml = r.cells ? r.cells.map((s,ci)=>`<td class="cell-col" style="background:${bgColor(s)};color:${fgColor(s)};width:13px;min-width:13px;max-width:13px;border:1px solid #475569">${cellChar(s)}</td>`).join("") : dates.map(()=>`<td style="width:13px;min-width:13px;max-width:13px;border:1px solid #334155;background:#1e293b"></td>`).join("");
+          const pctColor = r.pct===null?"#64748b":r.pct>=80?"#22c55e":r.pct>=50?"#f59e0b":"#ef4444";
+          const pctHtml = `<td class="pct-col" style="color:${pctColor}">${r.pct!==null?r.pct+"%":"—"}</td>`;
+          return `<tr style="background:${rowBg}"><td class="name-col" style="color:${r.isOutsider?"#fcd34d":"#f1f5f9"}">${r.name}</td><td class="pos-col" style="color:#e2e8f0">${r.pos}</td><td class="dept-col" style="color:#cbd5e1">${r.dept}</td>${cellsHtml}${pctHtml}</tr>`;
+        }).join("");
+
+        const monthHeaderHtml = groups.map(g=>`<th colspan="${g.count}" style="text-align:center;color:#34d399;font-size:9px;padding:3px 2px;border-left:1px solid #334155">${g.label}</th>`).join("");
+        const dateHeaderHtml = dates.map(d=>`<th style="text-align:center;font-size:8px;color:#94a3b8;padding:2px 1px;border-left:1px solid #1e293b;width:11px;min-width:11px;max-width:11px;writing-mode:vertical-lr;transform:rotate(180deg)">${d.slice(5).replace("-","/")} </th>`).join("");
+
+        const now = new Date();
+        const thaiDate = now.getDate()+" "+MONTHS[now.getMonth()]+" "+(now.getFullYear()+543);
+
+        const html = `<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">
+<title>Safety Talk — ${locName}</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Sarabun','TH Sarabun New',sans-serif; background:#0f172a; color:#e2e8f0; margin:0; padding:0; }
+  h1 { text-align:center; font-size:22px; margin:0 0 4px 0; color:#34d399; font-weight:bold; }
+  h2 { text-align:center; font-size:17px; margin:0 0 4px 0; color:#ffffff; font-weight:bold; }
+  .meta { text-align:center; font-size:12px; color:#94a3b8; margin-bottom:10px; }
+  table { border-collapse:collapse; width:100%; table-layout:fixed; }
+  thead { background:#0f172a; }
+  th { background:#1e293b; color:#94a3b8; font-size:11px; padding:4px 4px; border:1px solid #334155; }
+  td.name-col { padding:4px 6px; font-size:13px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#f1f5f9; }
+  td.pos-col  { padding:4px 5px; font-size:12px; white-space:nowrap; color:#e2e8f0; }
+  td.dept-col { padding:4px 5px; font-size:12px; white-space:nowrap; color:#cbd5e1; }
+  td.cell-col { text-align:center; padding:2px; font-weight:bold; font-size:11px; border:1px solid #475569; }
+  td.pct-col  { text-align:center; font-weight:bold; font-size:13px; border-left:2px solid #f59e0b80; padding:4px 5px; }
+  .sticky-name { width:155px; min-width:155px; max-width:155px; }
+  .sticky-pos  { width:85px;  min-width:85px;  max-width:85px; }
+  .sticky-dept { width:65px;  min-width:65px;  max-width:65px; }
+  tbody tr td { border-bottom:1px solid #1e293b; }
+  @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style>
+</head><body>
+<h1>รายงานผลการเข้าร่วมกิจกรรม Safety Talk</h1>
+<h2>${locName} — ${locFull}</h2>
+<div class="meta">พิมพ์เมื่อ ${thaiDate} • ${members.length} คน • ${dates.length} วันกิจกรรม (${dates[0]||""} ถึง ${dates[dates.length-1]||""})</div>
+<table>
+<thead>
+<tr>
+  <th class="sticky-name" rowspan="2">ชื่อ-นามสกุล</th>
+  <th class="sticky-pos" rowspan="2">ตำแหน่ง</th>
+  <th class="sticky-dept" rowspan="2">แผนก</th>
+  ${monthHeaderHtml}
+  <th class="pct-col" rowspan="2" style="text-align:center;color:#f59e0b">%</th>
+</tr>
+<tr>${dateHeaderHtml}</tr>
+</thead>
+<tbody>${rowsHtml}</tbody>
+</table>
+<div style="margin-top:10px;font-size:11px;color:#94a3b8;display:flex;gap:16px;align-items:center">
+  <span style="display:inline-flex;align-items:center;gap:5px"><span style="background:#22c55e;color:#fff;padding:2px 7px;border-radius:3px;font-weight:bold;font-size:12px">✓</span> เข้าร่วม</span>
+  <span style="display:inline-flex;align-items:center;gap:5px"><span style="background:#ef4444;color:#fff;padding:2px 7px;border-radius:3px;font-weight:bold;font-size:12px">✗</span> ไม่เข้าร่วม</span>
+  <span style="display:inline-flex;align-items:center;gap:5px"><span style="background:#64748b;color:#94a3b8;padding:2px 7px;border-radius:3px;font-weight:bold;font-size:12px">–</span> ยกเว้น</span>
+  <span style="display:inline-flex;align-items:center;gap:5px"><span style="background:#334155;color:#94a3b8;padding:2px 7px;border-radius:3px;font-weight:bold;font-size:12px">·</span> ยังไม่ถึงวันกิจกรรม</span>
+  <span style="margin-left:auto;color:#64748b;font-size:10px">% = เปอร์เซ็นต์การเข้าร่วมสะสม (นับถึงวันปัจจุบัน)</span>
+</div>
+</body></html>`;
+
+        const w = window.open("","_blank","width=1000,height=700");
+        if(!w){ alert("กรุณาอนุญาต Pop-up สำหรับเว็บนี้ก่อนครับ"); return; }
+        w.document.write(html);
+        w.document.close();
+        w.onload = () => { w.focus(); w.print(); };
+      };
+
+      // หาคนที่ลงทะเบียนในวันที่กำหนด แต่ไม่อยู่ใน members
+      const getOutsiders = useMemo(()=>{
+        const result = {}; // { date: [{att},...] }
+        dates.forEach(d=>{
+          const dayAtts = atts.filter(a=>{
+            if(a.locationId!==selLoc) return false;
+            if(a.timestamp.slice(0,10)!==d) return false;
+            // ตรวจว่าอยู่ใน members ไหม
+            const inMembers = members.some(m=>{
+              if(m.empId&&a.empId&&m.empId.toString().trim()===a.empId.toString().trim()) return true;
+              if(a.fullName&&m.fullName&&a.fullName.trim()===m.fullName.trim()) return true;
+              return false;
+            });
+            return !inMembers;
+          });
+          if(dayAtts.length>0) result[d] = dayAtts;
+        });
+        return result;
+      },[atts,members,dates,selLoc]);
+
+      // unique คนนอกฐาน (groupby ชื่อ+empId)
+      const outsiderList = useMemo(()=>{
+        const seen = new Set();
+        const list = [];
+        Object.values(getOutsiders).flat().forEach(a=>{
+          const key = (a.empId||"")+"__"+(a.fullName||"");
+          if(!seen.has(key)){ seen.add(key); list.push(a); }
+        });
+        return list;
+      },[getOutsiders]);
+
+      // วันที่มีคนลงทะเบียนแต่ไม่ได้อยู่ในแผน
+      const unplannedDates = useMemo(()=>{
+        const dateSet = new Set(dates);
+        const found = {}; // {date: count}
+        atts.forEach(a=>{
+          if(a.locationId!==selLoc) return;
+          const d = a.timestamp.slice(0,10);
+          if(!dateSet.has(d)){
+            found[d] = (found[d]||0) + 1;
+          }
+        });
+        return Object.entries(found).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,count])=>({date,count}));
+      },[atts,dates,selLoc]);
+
+      // สีและไอคอน cell (F = อนาคต)
+      const cellBg  = s => s==="P"?"bg-emerald-500":s==="E"?"bg-slate-600":s==="F"?"bg-slate-700/50":"bg-red-500/80";
+      const cellTxt = s => s==="P"?"✓":s==="E"?"–":s==="F"?"·":"✗";
+      const cellCol = s => s==="P"?"text-white font-black":s==="E"?"text-slate-400":s==="F"?"text-slate-600":"text-white font-black";
+
+      // format วันที่ไทย
+      const fmtDate = (iso) => {
+        const d = new Date(iso+"T00:00:00");
+        const m = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+        return d.getDate()+"\n"+m[d.getMonth()];
+      };
+      const fmtDateShort = (iso) => {
+        const d = new Date(iso+"T00:00:00");
+        return d.getDate()+""; // แค่วันที่ตัวเลข
+      };
+
+      const loc = locs[selLoc]||Object.values(locs)[0];
+
+      return (
+        <div className="space-y-5">
+          {/* PIN dialog สำหรับ cell override */}
+          {/* PIN dialog สำหรับลบวัน */}
+          {pinFor?.type==="deldate" && (
+            <PinDialog
+              title={`ลบวันที่ ${pinFor.date} ออกจากตาราง?`}
+              onConfirm={()=>deleteDate(pinFor.date)}
+              onCancel={()=>setPinFor(null)}
+            />
+          )}
+
+          {/* Header */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 className="text-xl font-black text-white flex items-center gap-2">📊 Dashboard สถิติการเข้าร่วม Safety Talk</h2>
+              <div className="flex gap-2">
+                <button onClick={()=>setShowAddDate(v=>!v)}
+                  className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 font-bold px-4 py-2 rounded-xl hover:bg-emerald-500/30 border border-emerald-500/30 text-sm">
+                  <IPlus sz={14}/>เพิ่มวันกิจกรรม
+                </button>
+                <button onClick={exportExcel}
+                  className="flex items-center gap-1.5 bg-blue-500/20 text-blue-400 font-bold px-4 py-2 rounded-xl hover:bg-blue-500/30 border border-blue-500/30 text-sm">
+                  <IDl sz={14}/>Excel
+                </button>
+                <button onClick={exportPDF}
+                  className="flex items-center gap-1.5 bg-red-500/20 text-red-400 font-bold px-4 py-2 rounded-xl hover:bg-red-500/30 border border-red-500/30 text-sm">
+                  📄 PDF
+                </button>
+              </div>
+            </div>
+
+            {/* เพิ่มวัน */}
+            {showAddDate && (
+              <div className="bg-slate-900/60 rounded-xl p-4 mb-4 space-y-3">
+                <div className="flex flex-wrap gap-3 items-end">
+                  <div>
+                    <label className="block text-slate-400 text-xs font-semibold mb-1">เลือกวันกิจกรรม Safety Talk</label>
+                    <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)}
+                      className="bg-slate-800 border border-slate-600 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none text-sm"/>
+                  </div>
+                  <button onClick={addDate} disabled={savingDate}
+                    className="bg-emerald-500 text-slate-900 font-bold px-5 py-2 rounded-lg hover:bg-emerald-400 disabled:opacity-60 text-sm">
+                    {savingDate?"กำลังบันทึก...":"เพิ่มวัน"}
+                  </button>
+                  <button onClick={()=>setShowAddDate(false)} className="bg-slate-700 text-white px-4 py-2 rounded-lg text-sm">ยกเลิก</button>
+                </div>
+
+                {/* คัดลอกวันจากหน่วยงานนี้ไปทุกหน่วยงาน */}
+                <div className="border-t border-slate-700 pt-3">
+                  <p className="text-slate-400 text-xs font-semibold mb-2">📋 คัดลอกวันกิจกรรมจาก <span className="text-emerald-400">{locs[selLoc]?.name}</span> ไปใช้ทุกหน่วยงาน</p>
+                  <p className="text-slate-500 text-xs mb-2">วันที่ปัจจุบัน ({dates.length} วัน): {dates.slice(0,5).map(d=>d.slice(5).replace("-","/")).join(", ")}{dates.length>5?"...":""}</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      disabled={copying||dates.length===0}
+                      onClick={async ()=>{
+                        if(dates.length===0){ alert("ยังไม่มีวันกิจกรรมสำหรับ "+locs[selLoc]?.name); return; }
+                        if(!window.confirm("ยืนยัน: คัดลอก "+dates.length+" วัน จาก "+locs[selLoc]?.name+" ไปใช้กับทุกหน่วยงาน?")){return;}
+                        setCopying(true); setCopyMsg("");
+                        try {
+                          const docSD = await db.collection("settings").doc("safetydates").get();
+                          const cur = docSD.exists ? (docSD.data()||{}) : {};
+                          const updated = {...cur};
+                          Object.keys(locs).forEach(locId=>{
+                            if(locId===selLoc) return;
+                            const ex = new Set(cur[locId]||[]);
+                            dates.forEach(d=>ex.add(d));
+                            updated[locId] = [...ex].sort();
+                          });
+                          await db.collection("settings").doc("safetydates").set(updated);
+                          setSafeDates(prev=>{
+                            const next={...prev};
+                            Object.keys(locs).forEach(locId=>{ if(locId!==selLoc) next[locId]=updated[locId]; });
+                            return next;
+                          });
+                          setCopyMsg("✅ คัดลอกสำเร็จ ทุกหน่วยงานมีวันกิจกรรมครบแล้ว");
+                          setTimeout(()=>setCopyMsg(""),4000);
+                        } catch(e){ setCopyMsg("❌ เกิดข้อผิดพลาด: "+e.message); }
+                        finally { setCopying(false); }
+                      }}
+                      className="flex items-center gap-2 bg-purple-500/20 text-purple-400 font-bold px-4 py-2 rounded-lg hover:bg-purple-500/30 border border-purple-500/30 text-sm disabled:opacity-50">
+                      {copying?<ISpin sz={14}/>:"📋"}
+                      {copying?"กำลังคัดลอก...":"คัดลอกวันนี้ไปทุก 10 หน่วยงาน"}
+                    </button>
+                    {copyMsg&&<p className="text-xs font-semibold" style={{color:copyMsg.startsWith("✅")?"#34d399":"#ef4444"}}>{copyMsg}</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* เลือกหน่วยงาน */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-3">
+              {Object.values(locs).map(l=>(
+                <button key={l.id} onClick={()=>setSelLoc(l.id)}
+                  className={`px-3 py-2 rounded-xl font-bold text-xs transition-all text-center ${selLoc===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700 text-slate-300 hover:bg-slate-600"}`}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+            <div className="p-3 bg-slate-900/50 rounded-lg">
+              <p className="text-emerald-400 font-bold text-sm">{loc.name}</p>
+              <p className="text-slate-400 text-xs">{loc.fullName} — {members.length} คน • {dates.length} วันกิจกรรม</p>
+            </div>
+          </div>
+
+          {/* คำอธิบาย */}
+          <div className="bg-slate-800/30 border border-slate-700 rounded-xl p-3 flex flex-wrap gap-4 text-xs text-slate-400">
+            <span className="flex items-center gap-1"><span className="bg-emerald-500 text-white font-black w-6 h-6 rounded flex items-center justify-center">✓</span> เข้าร่วม (P)</span>
+            <span className="flex items-center gap-1"><span className="bg-red-500/80 text-white font-black w-6 h-6 rounded flex items-center justify-center">✗</span> ไม่เข้าร่วม (O)</span>
+            <span className="flex items-center gap-1"><span className="bg-slate-600 text-slate-400 font-black w-6 h-6 rounded flex items-center justify-center">–</span> ยกเว้น/ไม่นับ (E)</span>
+            <span className="text-slate-500">• กดที่ช่องเพื่อสลับสถานะ (ต้องใส่ PIN) • กดวันที่เพื่อลบ</span>
+          </div>
+
+          {/* Alert: วันที่มีการลงทะเบียนนอกแผน */}
+          {unplannedDates.length>0 && (
+            <div className="bg-orange-500/15 border-2 border-orange-500/50 rounded-2xl p-4 shadow-lg">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl flex-shrink-0">⚠️</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-orange-400 font-black text-sm mb-1">
+                    มี {unplannedDates.reduce((s,x)=>s+x.count,0)} รายการ ที่ลงทะเบียนในวันที่ไม่ได้กำหนดในแผน
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {unplannedDates.map(({date,count})=>{
+                      const d=new Date(date+"T00:00:00");
+                      const MN=["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+                      const label=d.getDate()+" "+MN[d.getMonth()]+" "+(d.getFullYear()+543);
+                      return (
+                        <div key={date} className="flex items-center gap-1.5 bg-slate-900/60 border border-orange-500/30 rounded-lg px-2 py-1">
+                          <span className="text-white text-xs font-bold">{label}</span>
+                          <span className="text-orange-400 text-xs">({count} คน)</span>
+                          <button
+                            onClick={async ()=>{
+                              if(dates.includes(date)){ alert("วันที่นี้มีอยู่แล้ว"); return; }
+                              try {
+                                const docSD=await db.collection("settings").doc("safetydates").get();
+                                const cur=docSD.exists?(docSD.data()||{}):{};
+                                const updated={...cur,[selLoc]:[...(cur[selLoc]||[]),date].sort()};
+                                await db.collection("settings").doc("safetydates").set(updated);
+                                setSafeDates(prev=>({...prev,[selLoc]:updated[selLoc]}));
+                              } catch(e){ alert("เพิ่มวันไม่ได้: "+e.message); }
+                            }}
+                            className="bg-emerald-500/20 text-emerald-400 text-xs font-bold px-2 py-0.5 rounded hover:bg-emerald-500/40 transition-colors">
+                            + เพิ่มในแผน
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ตาราง */}
+          {loadingD
+            ? <div className="flex justify-center py-16"><ISpin sz={36} cl="text-emerald-400"/></div>
+            : members.length===0
+              ? <div className="text-center py-16 text-slate-500 bg-slate-800/30 rounded-2xl"><p className="text-lg">ยังไม่มีรายชื่อ</p><p className="text-sm mt-1">เพิ่มรายชื่อในหน้า "จัดการรายชื่อ" ก่อนครับ</p></div>
+              : dates.length===0
+                ? <div className="text-center py-16 text-slate-500 bg-slate-800/30 rounded-2xl"><p className="text-lg">ยังไม่มีวันกิจกรรม</p><p className="text-sm mt-1">กดปุ่ม "เพิ่มวันกิจกรรม" ด้านบนครับ</p></div>
+                : (
+                <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl shadow-xl overflow-hidden">
+                  <div className="dash-table-wrap">
+                    <table className="text-xs dash-table">
+                      {/* Header row 1 — ชื่อเดือน */}
+                      <thead>
+                        <tr className="bg-slate-900/80">
+                          <th className="px-1 py-2 text-left text-slate-300 font-bold sticky left-0 bg-slate-900 z-10 dash-col-name" rowSpan="2">ชื่อ</th>
+                          <th className="px-1 py-2 text-left text-slate-300 font-bold sticky bg-slate-900 z-10 dash-col-pos" rowSpan="2" style={{left:"130px"}}>ตำแหน่ง</th>
+                          <th className="px-1 py-2 text-left text-slate-300 font-bold sticky bg-slate-900 z-10 dash-col-dept" rowSpan="2" style={{left:"215px"}}>แผนก</th>
+                          {(()=>{
+                            // group dates by month
+                            const groups = [];
+                            let cur = null;
+                            dates.forEach(d=>{
+                              const mon = d.slice(0,7);
+                              if(!cur||cur.mon!==mon){ cur={mon,count:1}; groups.push(cur); }
+                              else cur.count++;
+                            });
+                            const MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+                            return groups.map(g=>(
+                              <th key={g.mon} colSpan={g.count} className="dash-th-month text-center text-emerald-400 font-bold border-l border-slate-700" style={{fontSize:"9px",padding:"2px 1px"}}>
+                                {MONTHS[parseInt(g.mon.slice(5))-1]}
+                              </th>
+                            ));
+                          })()}
+                          <th className="px-1 py-2 text-center text-amber-400 font-bold border-l-2 border-amber-500/40 sticky right-0 bg-slate-900 z-10 dash-col-pct" rowSpan="2">%</th>
+                        </tr>
+                        {/* Header row 2 — วันที่ */}
+                        <tr className="bg-slate-900/60">
+                          {dates.map(d=>(
+                            <th key={d} className="text-center border-l border-slate-700 font-bold text-slate-300 cursor-pointer hover:text-red-400 transition-colors relative group" style={{padding:"2px 0"}}
+                              onClick={()=>setPinFor({type:"deldate",date:d})}>
+                              <span style={{fontSize:"9px",lineHeight:"1"}}>{new Date(d+"T00:00:00").getDate()}</span>
+                              <div className="absolute -top-0.5 right-0.5 text-red-400 opacity-0 group-hover:opacity-100 text-xs">×</div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-700/30">
+                        {members.map((m,i)=>{
+                          const pct = calcPct(m);
+                          return (
+                            <tr key={m.id} className={`${i%2===0?"bg-slate-800/20":"bg-slate-900/20"} hover:bg-slate-700/30 transition-colors`}>
+                              <td className="px-1 py-1 text-white font-medium sticky left-0 bg-inherit z-10 border-r border-slate-700/50 overflow-hidden dash-col-name dash-td-text">
+                                <div className="truncate" style={{fontSize:"11px"}}>{m.fullName}</div>
+                              </td>
+                              <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-inherit z-10 border-r border-slate-700/50 overflow-hidden dash-col-pos dash-td-text" style={{left:"130px"}}>
+                                {m.position}
+                              </td>
+                              <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-inherit z-10 border-r border-slate-700/50 overflow-hidden dash-col-dept dash-td-text" style={{left:"215px"}}>
+                                {m.department}
+                              </td>
+                              {dates.map(d=>{
+                                const s = getCellStatus(m,d);
+                                const future = s==="F";
+                                return (
+                                  <td key={d} className="text-center border-l border-slate-700/30" style={{padding:"1px 0"}}>
+                                    <button onClick={()=>!future&&cycleCell(m,d)}
+                                      className={`dash-cell transition-all ${future?"cursor-default":""} ${!future?"hover:scale-105 active:scale-95":""} ${cellBg(s)} ${cellCol(s)}`}
+                                      title={future?"ยังไม่ถึงวันกิจกรรม":s==="P"?"เข้าร่วม (คลิกเพื่อเปลี่ยน)":s==="E"?"ยกเว้น (คลิกเพื่อเปลี่ยน)":"ไม่เข้าร่วม (คลิกเพื่อเปลี่ยน)"}>
+                                      {cellTxt(s)}
+                                    </button>
+                                  </td>
+                                );
+                              })}
+                              <td className="px-1 py-1 text-center font-black border-l-2 border-amber-500/40 sticky right-0 bg-inherit z-10 text-xs dash-col-pct"
+                                style={{color:pct===null?"#64748b":pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444"}}>
+                                {pct===null?"—":pct+"%"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {/* แถวคนนอกฐานข้อมูล */}
+                        {outsiderList.length>0 && (
+                          <>
+                            <tr className="bg-amber-500/10 border-t-2 border-amber-500/30">
+                              <td colSpan={4+dates.length+1} className="px-3 py-1.5 text-amber-400 font-bold text-xs flex items-center gap-2">
+                                <span>⚠️ พบ {outsiderList.length} คน ที่ลงทะเบียนแต่ยังไม่อยู่ในฐานข้อมูล</span>
+                                <span className="text-slate-500 font-normal">— ควรเพิ่มในหน้า "จัดการรายชื่อ"</span>
+                              </td>
+                            </tr>
+                            {outsiderList.map((a,i)=>(
+                              <tr key={a.id||i} className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
+                                <td className="px-1 py-1 text-amber-300 font-medium sticky left-0 bg-amber-500/5 z-10 border-r border-amber-500/20 overflow-hidden dash-col-name dash-td-text">
+                                  <div className="truncate" style={{fontSize:"11px"}}>{a.fullName||"—"}</div>
+                                </td>
+                                <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-amber-500/5 z-10 border-r border-amber-500/20 overflow-hidden dash-col-pos dash-td-text" style={{left:"130px"}}>
+                                  {a.position||"—"}
+                                </td>
+                                <td className="px-1 py-1 text-white whitespace-nowrap sticky bg-amber-500/5 z-10 border-r border-amber-500/20 overflow-hidden dash-col-dept dash-td-text" style={{left:"215px"}}>
+                                  {a.department||"—"}
+                                </td>
+                                {dates.map(d=>{
+                                  const hit = (getOutsiders[d]||[]).some(x=>{
+                                    if(a.empId&&x.empId&&a.empId.toString().trim()===x.empId.toString().trim()) return true;
+                                    if(a.fullName&&x.fullName&&a.fullName.trim()===x.fullName.trim()) return true;
+                                    return false;
+                                  });
+                                  return (
+                                    <td key={d} className="text-center border-l border-amber-500/10 p-0.5">
+                                      {hit
+                                        ?<div className="w-8 h-7 rounded text-xs font-black flex items-center justify-center mx-auto bg-amber-500/70 text-white">✓</div>
+                                        :<div className="w-8 h-7 rounded text-xs flex items-center justify-center mx-auto bg-slate-800/40 text-slate-600">·</div>
+                                      }
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-2 py-1.5 text-center text-amber-500/60 font-bold text-xs border-l-2 border-amber-500/40 sticky right-0 bg-amber-500/5 z-10">—</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
+                        {/* แถวสรุปรวม */}
+                        <tr className="bg-slate-700/40 font-bold border-t-2 border-slate-500">
+                          <td className="px-1 py-2 text-emerald-400 font-black sticky left-0 bg-slate-700/60 z-10 border-r border-slate-600 dash-col-name" style={{fontSize:"10px"}}>รวม</td>
+                          <td className="px-1 py-1 sticky bg-slate-700/60 z-10 border-r border-slate-600 dash-col-pos" style={{left:"130px"}}></td><td className="px-1 py-1 sticky bg-slate-700/60 z-10 border-r border-slate-600 dash-col-dept" style={{left:"215px"}}></td>
+                          {dates.map(d=>{
+                            const pct = calcDateSummary(d);
+                            return (
+                              <td key={d} className="text-center border-l border-slate-600" style={{padding:"1px 0"}}>
+                                <span style={{fontSize:"8px",fontWeight:"900",color:pct===null?"#64748b":pct>=80?"#10b981":pct>=50?"#f59e0b":"#ef4444",display:"block",lineHeight:"1.2"}}>
+                                  {pct===null?"—":pct+"%"}
+                                </span>
+                              </td>
+                            );
+                          })}
+                          <td className="px-2 py-2 text-center sticky right-0 bg-slate-700/60 z-10 border-l-2 border-amber-500/40">
+                            {(()=>{
+                              let tp=0,tt=0;
+                              members.forEach(m=>{
+                                const pct=calcPct(m);
+                                if(pct!==null){tp+=pct;tt++;}
+                              });
+                              return tt>0?<span className="text-amber-400 font-black">{Math.round(tp/tt)}%</span>:<span className="text-slate-500">—</span>;
+                            })()}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+          }
+        </div>
+      );
+    }
+
+    // ============ REPORTS VIEW ============
+    function ReportsView({ atts, locs }) {
+      const week = getWeekRange();
+      const [selLoc,setSelLoc]     = useState("lampun");
+      const [dateFrom,setDateFrom] = useState(week.start);
+      const [dateTo,setDateTo]     = useState(week.end);
+      const [modal,setModal]       = useState(null);
+      const [delTarget,setDelTarget] = useState(null);  // record ที่จะลบ
+      const [delPin,setDelPin]     = useState("");
+      const [delErr,setDelErr]     = useState("");
+      const [deleting,setDeleting] = useState(false);
+      const [localAtts,setLocalAtts] = useState(atts);
+
+      // sync localAtts เมื่อ atts เปลี่ยน
+      useEffect(()=>{ setLocalAtts(atts); },[atts]);
+
+      const confirmDelete = async () => {
+        if(delPin !== ADMIN_PIN){ setDelErr("PIN ไม่ถูกต้อง"); setDelPin(""); return; }
+        setDeleting(true);
+        try {
+          await db.collection("attendances").doc(delTarget.id).delete();
+          setLocalAtts(prev=>prev.filter(a=>a.id!==delTarget.id));
+          setDelTarget(null); setDelPin(""); setDelErr("");
+          if(modal?.id===delTarget.id) setModal(null);
+        } catch(e){ setDelErr("ลบไม่สำเร็จ: "+e.message); }
+        finally { setDeleting(false); }
+      };
+
+      const locAtts = useMemo(()=>{
+        return localAtts.filter(a=>{
+          if(a.locationId!==selLoc) return false;
+          const d=a.timestamp.slice(0,10);
+          return d>=dateFrom && d<=dateTo;
+        });
+      },[localAtts,selLoc,dateFrom,dateTo]);
+
+      const loc = locs[selLoc]||Object.values(locs)[0];
+
+      // Export Excel
+      const exportExcel = () => {
+        const rows = locAtts.map(a=>({
+          "รหัสพนักงาน":    a.empId||"-",
+          "ชื่อ-นามสกุล":   a.fullName,
+          "ตำแหน่ง":        a.position,
+          "สังกัด/แผนก":    a.department,
+          "หน่วยงาน":       a.locationName,
+          "วันที่":         thaiD(a.timestamp),
+          "เวลา":           new Date(a.timestamp).toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"}),
+          "ระยะห่าง (ม.)":  a.distance,
+          "พิกัด Lat":      a.location?.lat?.toFixed(6)||"",
+          "พิกัด Lng":      a.location?.lng?.toFixed(6)||"",
+          "URL รูปภาพ":     a.photoURL||"",
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, loc.name);
+        XLSX.writeFile(wb, `safety-talk-${selLoc}-${dateFrom}-${dateTo}.xlsx`);
+      };
+
+      return (
+        <div className="space-y-5">
+          {/* Delete Confirm Modal */}
+          {delTarget&&(
+            <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-800 border border-red-500/40 rounded-2xl p-6 shadow-2xl w-full max-w-sm text-center">
+                <div className="text-4xl mb-3">🗑️</div>
+                <h3 className="text-white font-black text-lg mb-1">ยืนยันการลบรายการ</h3>
+                <p className="text-slate-400 text-sm mb-1">{delTarget.fullName}</p>
+                <p className="text-slate-500 text-xs mb-4">{thaiDT(delTarget.timestamp)}</p>
+                <p className="text-red-400 text-sm font-semibold mb-3">⚠️ ข้อมูลจะถูกลบถาวร ไม่สามารถกู้คืนได้</p>
+                <input type="password" value={delPin} onChange={e=>{setDelPin(e.target.value);setDelErr("");}}
+                  onKeyDown={e=>e.key==="Enter"&&confirmDelete()}
+                  placeholder="กรอก PIN ยืนยัน"
+                  className="w-full bg-slate-900 border-2 border-slate-700 text-white px-4 py-2.5 rounded-lg focus:border-red-500 focus:outline-none text-center text-xl tracking-widest mb-2"/>
+                {delErr&&<p className="text-red-400 text-sm mb-2">{delErr}</p>}
+                <div className="flex gap-3 mt-3">
+                  <button onClick={()=>{setDelTarget(null);setDelPin("");setDelErr("");}}
+                    className="flex-1 bg-slate-700 text-white font-bold py-2.5 rounded-lg hover:bg-slate-600">ยกเลิก</button>
+                  <button onClick={confirmDelete} disabled={deleting}
+                    className="flex-1 bg-red-500 text-white font-black py-2.5 rounded-lg hover:bg-red-600 disabled:opacity-60">
+                    {deleting?"กำลังลบ...":"ยืนยันลบ"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Photo Modal */}
+          {modal&&(
+            <div className="fixed inset-0 bg-black/85 z-50 flex items-center justify-center p-4" onClick={()=>setModal(null)}>
+              <div className="relative max-w-md w-full" onClick={e=>e.stopPropagation()}>
+                <img src={modal.photoURL} alt="proof" className="w-full rounded-2xl shadow-2xl border-2 border-emerald-500/40"/>
+                <div className="mt-3 bg-slate-900/95 rounded-xl p-4 text-sm space-y-1">
+                  <p className="text-white font-black text-base">{modal.fullName}</p>
+                  <p className="text-slate-300">{modal.position} • {modal.department}</p>
+                  <p className="text-emerald-400 font-semibold">{thaiDT(modal.timestamp)}</p>
+                  <p className="text-slate-300">📍 ระยะห่าง <span className="text-white font-bold">{modal.distance} ม.</span></p>
+                  <p className="text-slate-400 text-xs font-mono">พิกัด: {modal.location?.lat?.toFixed(6)}, {modal.location?.lng?.toFixed(6)}</p>
+                  {modal.empId&&<p className="text-slate-400 text-xs">รหัสพนักงาน: {modal.empId}</p>}
+                  <a href={modal.photoURL} target="_blank" rel="noreferrer" className="inline-block mt-1 text-sky-400 text-xs underline">เปิดรูปในแท็บใหม่ ↗</a>
+                </div>
+                <button onClick={()=>setModal(null)} className="absolute top-2 right-2 bg-slate-900/80 text-white w-9 h-9 rounded-full flex items-center justify-center font-black text-lg hover:bg-red-500 transition-colors">✕</button>
+              </div>
+            </div>
+          )}
+
+          {/* เลือกหน่วยงาน */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h2 className="text-xl font-black text-white mb-4 flex items-center"><IBar sz={22} cl="text-emerald-400 mr-2"/>เลือกหน่วยงาน</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+              {Object.values(locs).map(l=>(
+                <button key={l.id} onClick={()=>setSelLoc(l.id)}
+                  className={`px-3 py-2.5 rounded-xl font-bold text-xs transition-all text-center ${selLoc===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700/80 text-slate-300 hover:bg-slate-600"}`}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 p-3 bg-slate-900/50 rounded-lg">
+              <p className="text-emerald-400 font-bold">{loc.name}</p>
+              <p className="text-slate-400 text-xs">{loc.fullName}</p>
+            </div>
+          </div>
+
+          {/* กรองวันที่ + Export */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <div className="flex flex-wrap gap-3 items-end justify-between">
+              <div className="flex items-center gap-3 flex-wrap">
+                <IFilter sz={18} cl="text-emerald-400"/>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">จากวันที่</label>
+                  <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+                    className="bg-slate-900/80 border-2 border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none text-sm"/>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">ถึงวันที่</label>
+                  <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+                    className="bg-slate-900/80 border-2 border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none text-sm"/>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={()=>{const w=getWeekRange();setDateFrom(w.start);setDateTo(w.end);}}
+                    className="bg-slate-700 text-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-600">สัปดาห์นี้</button>
+                  <button onClick={()=>{const n=new Date();setDateFrom(new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10));setDateTo(new Date(n.getFullYear(),n.getMonth()+1,0).toISOString().slice(0,10));}}
+                    className="bg-slate-700 text-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-600">เดือนนี้</button>
+                </div>
+              </div>
+              <button onClick={exportExcel}
+                className="bg-emerald-500 text-slate-900 font-bold px-5 py-2.5 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50 flex items-center text-sm">
+                <IDl sz={16} cl="mr-2"/>Export Excel
+              </button>
+            </div>
+            <div className="mt-3 text-slate-400 text-sm">
+              พบ <span className="text-white font-bold">{locAtts.length}</span> รายการ ระหว่าง {thaiD(dateFrom+"T00:00:00")} — {thaiD(dateTo+"T00:00:00")}
+            </div>
+          </div>
+
+          {/* Photo Grid */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h3 className="text-lg font-black text-white mb-1 flex items-center"><IEye sz={20} cl="text-emerald-400 mr-2"/>หลักฐานรูปภาพ</h3>
+            <p className="text-slate-400 text-xs mb-4">กดที่รูปเพื่อดูรายละเอียดและพิกัด • รูปเก็บที่ ImgBB 90 วัน</p>
+            {locAtts.length===0
+              ? <div className="text-center py-10 text-slate-500"><IFile sz={36} cl="mx-auto mb-3 opacity-50"/><p>ไม่มีข้อมูลในช่วงเวลาที่เลือก</p></div>
+              : <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                  {locAtts.map(a=>(
+                    <div key={a.id} className="bg-slate-900/70 rounded-xl overflow-hidden border border-slate-700 hover:border-emerald-500/60 transition-all group">
+                      <div onClick={()=>a.photoURL&&setModal(a)} className="cursor-pointer">
+                        {a.photoURL
+                          ?<div className="relative">
+                            <img src={a.photoThumb||a.photoURL} alt="proof" className="w-full h-32 object-cover group-hover:opacity-90 transition-opacity"/>
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 to-transparent"/>
+                            <span className="absolute bottom-2 left-2 text-emerald-400 text-xs font-bold bg-slate-900/80 px-1.5 py-0.5 rounded-full">📍{a.distance}ม.</span>
+                          </div>
+                          :<div className="w-full h-32 bg-slate-800 flex items-center justify-center"><ICamera sz={24} cl="text-slate-600"/></div>
+                        }
+                        <div className="p-2 pb-1">
+                          <p className="text-white font-bold text-xs truncate">{a.fullName}</p>
+                          <p className="text-slate-400 text-xs truncate">{a.position}</p>
+                          <p className="text-emerald-400 text-xs">{new Date(a.timestamp).toLocaleDateString("th-TH",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</p>
+                        </div>
+                      </div>
+                      <div className="px-2 pb-2">
+                        <button onClick={e=>{e.stopPropagation();setDelTarget(a);setDelPin("");setDelErr("");}}
+                          className="w-full bg-red-500/10 text-red-400 text-xs font-bold py-1 rounded-lg hover:bg-red-500/20 transition-colors border border-red-500/20">
+                          🗑️ ลบรายการ
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+            }
+          </div>
+
+          {/* ตารางข้อมูล */}
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-5 shadow-xl">
+            <h3 className="text-lg font-black text-white mb-4">รายละเอียดการลงทะเบียน</h3>
+            <div className="bg-slate-900/50 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-800">
+                  <tr>{["วันที่/เวลา","รหัส","ชื่อ-นามสกุล","ตำแหน่ง","สังกัด","ระยะ(ม.)",""].map(h=>(
+                    <th key={h} className="px-3 py-2.5 text-left text-emerald-400 font-bold whitespace-nowrap">{h}</th>
+                  ))}</tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700">
+                  {locAtts.length===0
+                    ?<tr><td colSpan="6" className="px-4 py-10 text-center text-slate-500">ไม่มีข้อมูล</td></tr>
+                    :locAtts.map(a=>(
+                      <tr key={a.id} className="hover:bg-slate-800/50 transition-colors">
+                        <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{new Date(a.timestamp).toLocaleDateString("th-TH",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</td>
+                        <td className="px-3 py-2.5 text-slate-400">{a.empId||"-"}</td>
+                        <td className="px-3 py-2.5 text-white font-medium">{a.fullName}</td>
+                        <td className="px-3 py-2.5 text-slate-300">{a.position}</td>
+                        <td className="px-3 py-2.5 text-slate-300">{a.department}</td>
+                        <td className="px-3 py-2.5 text-center text-emerald-400 font-bold">{a.distance}</td>
+                        <td className="px-3 py-2.5 text-center">
+                          <button onClick={()=>{setDelTarget(a);setDelPin("");setDelErr("");}}
+                            className="bg-red-500/10 text-red-400 text-xs font-bold px-2 py-1 rounded-lg hover:bg-red-500/20 border border-red-500/20 whitespace-nowrap">
+                            🗑️ ลบ
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============ SETTINGS VIEW ============
+    // ---- MAP COMPONENT ----
+    function LocationMap({ lat, lng, name, onMapClick }) {
+      const mapRef = useRef(null);
+      const mapObjRef = useRef(null);
+      const markerRef = useRef(null);
+      const circleRef = useRef(null);
+
+      useEffect(()=>{
+        if(!mapRef.current) return;
+        // init map ครั้งเดียว
+        if(!mapObjRef.current) {
+          mapObjRef.current = L.map(mapRef.current, { zoomControl:true }).setView([lat,lng], 17);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution:'© OpenStreetMap',
+            maxZoom:19
+          }).addTo(mapObjRef.current);
+          // คลิกแผนที่เพื่อตั้งพิกัด
+          mapObjRef.current.on('click', e=>{
+            onMapClick(e.latlng.lat, e.latlng.lng);
+          });
+        }
+        return ()=>{};
+      },[]);
+
+      // อัพเดทหมุดและวงกลมเมื่อพิกัดเปลี่ยน
+      useEffect(()=>{
+        if(!mapObjRef.current) return;
+        const validLat = parseFloat(lat)||0, validLng = parseFloat(lng)||0;
+        if(!validLat || !validLng) return;
+
+        // ลบหมุดและวงกลมเก่า
+        if(markerRef.current) mapObjRef.current.removeLayer(markerRef.current);
+        if(circleRef.current) mapObjRef.current.removeLayer(circleRef.current);
+
+        // วงกลมแสดงรัศมี 20 เมตร
+        circleRef.current = L.circle([validLat,validLng], {
+          radius: 20, color:'#10b981', fillColor:'#10b981', fillOpacity:0.15, weight:2
+        }).addTo(mapObjRef.current);
+
+        // หมุด custom
+        const icon = L.divIcon({
+          className:'',
+          html:`<div style="width:36px;height:36px;background:#10b981;border:3px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);font-size:16px;">📍</div>`,
+          iconSize:[36,36], iconAnchor:[18,36]
+        });
+        markerRef.current = L.marker([validLat,validLng], {icon, draggable:true})
+          .bindPopup(`<b>${name}</b><br/>${validLat.toFixed(6)}, ${validLng.toFixed(6)}`)
+          .addTo(mapObjRef.current)
+          .openPopup();
+
+        // ลากหมุดได้
+        markerRef.current.on('dragend', e=>{
+          const p = e.target.getLatLng();
+          onMapClick(p.lat, p.lng);
+        });
+
+        // ย้ายแผนที่ไปที่หมุดใหม่
+        mapObjRef.current.setView([validLat,validLng], mapObjRef.current.getZoom());
+      },[lat,lng,name]);
+
+      return (
+        <div>
+          <div ref={mapRef} style={{height:"320px",borderRadius:"12px",overflow:"hidden",border:"2px solid rgba(16,185,129,0.3)"}}/>
+          <p className="text-slate-500 text-xs mt-2 text-center">
+            💡 กดที่แผนที่เพื่อตั้งพิกัด หรือลากหมุดสีเขียวได้เลย • วงกลมสีเขียว = รัศมี 20 เมตร
+          </p>
+        </div>
+      );
+    }
+
+    function SettingsView({ curLoc, setCurLoc, locs, setLocs }) {
+      const [sel,setSel]   = useState(curLoc);
+      const [saved,setSaved] = useState(false);
+      const cur = locs[sel]||Object.values(locs)[0];
+      const [saving,setSaving] = useState(false);
+
+      const upd = (la,ln) => setLocs(prev=>({...prev,[sel]:{...prev[sel],lat:parseFloat(la)||0,lng:parseFloat(ln)||0}}));
+      const gps = () => navigator.geolocation.getCurrentPosition(p=>upd(p.coords.latitude,p.coords.longitude),()=>alert("ไม่สามารถรับตำแหน่งได้"));
+      const save = async () => {
+        setSaving(true);
+        try {
+          // บันทึกเฉพาะค่าที่แก้ไขได้ (ไม่เก็บ fullName เดิมซ้ำ เพราะอยู่ใน LOCATIONS แล้ว)
+          const toSave = {};
+          Object.keys(locs).forEach(id=>{
+            toSave[id] = {
+              lat:         locs[id].lat,
+              lng:         locs[id].lng,
+              maxDist:     locs[id].maxDist     || 50,
+              displayDist: locs[id].displayDist || 20,
+              timeStart:   locs[id].timeStart   || "08:00",
+              timeEnd:     locs[id].timeEnd     || "09:30",
+            };
+          });
+          await db.collection("settings").doc("locations").set(toSave);
+          setSaved(true);
+          setTimeout(()=>setSaved(false), 3000);
+        } catch(e) {
+          alert("บันทึกไม่สำเร็จ: " + e.message);
+        } finally {
+          setSaving(false);
+        }
+      };
+      const apply = () => { setCurLoc(sel); alert(`เปลี่ยนสถานที่เป็น ${locs[sel].name} แล้ว`); };
+      const copyUrl = url => navigator.clipboard.writeText(url).then(()=>alert("คัดลอกแล้ว!"));
+
+      const base = `${window.location.origin}${window.location.pathname}`;
+
+      return (
+        <div className="max-w-4xl mx-auto space-y-5">
+          <div className="bg-slate-800/50 backdrop-blur-lg border border-emerald-500/30 rounded-2xl p-6 shadow-xl">
+            <h2 className="text-xl font-black text-white mb-5 flex items-center"><ICog sz={22} cl="text-emerald-400 mr-2"/>ตั้งค่าพิกัดหน่วยงาน</h2>
+
+            {/* เลือกหน่วยงาน */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-4">
+              {Object.values(locs).map(l=>(
+                <button key={l.id} onClick={()=>setSel(l.id)}
+                  className={`px-3 py-2 rounded-xl font-bold text-xs transition-all ${sel===l.id?"bg-emerald-500 text-slate-900 shadow-lg shadow-emerald-500/50":"bg-slate-700 text-slate-300 hover:bg-slate-600"}`}>
+                  {l.name}
+                </button>
+              ))}
+            </div>
+            <div className="p-3 bg-slate-900/50 rounded-lg mb-4">
+              <p className="text-emerald-400 font-bold">{cur.name}</p>
+              <p className="text-slate-400 text-sm">{cur.fullName}</p>
+            </div>
+
+            {/* แผนที่ */}
+            <div className="mb-4">
+              <LocationMap key={sel} lat={cur.lat} lng={cur.lng} name={cur.name} onMapClick={(la,ln)=>upd(la,ln)}/>
+            </div>
+
+            {/* input พิกัด */}
+            <div className="grid grid-cols-2 gap-4 mb-3">
+              <div>
+                <label className="block text-slate-400 text-sm font-semibold mb-1">Latitude</label>
+                <input type="number" step="0.000001" value={cur.lat} onChange={e=>upd(e.target.value,cur.lng)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm font-semibold mb-1">Longitude</label>
+                <input type="number" step="0.000001" value={cur.lng} onChange={e=>upd(cur.lat,e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+              </div>
+            </div>
+
+            {/* ตั้งค่ารัศมี */}
+            <div className="bg-slate-800/60 border border-slate-600 rounded-xl p-4 mb-3">
+              <label className="block text-white font-bold text-sm mb-3">🎯 รัศมีที่อนุญาต (เมตร) — {cur.name}</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">รัศมีจริง (ระบบใช้)</label>
+                  <input type="number" min="10" max="500" step="5"
+                    value={cur.maxDist||50}
+                    onChange={e=>setLocs(prev=>({...prev,[sel]:{...prev[sel],maxDist:parseInt(e.target.value)||50}}))}
+                    className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+                  <p className="text-slate-500 text-xs mt-1">ระยะจริงที่ระบบยอมรับ</p>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">รัศมีที่แสดงผู้ใช้</label>
+                  <input type="number" min="5" max="500" step="5"
+                    value={cur.displayDist||20}
+                    onChange={e=>setLocs(prev=>({...prev,[sel]:{...prev[sel],displayDist:parseInt(e.target.value)||20}}))}
+                    className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+                  <p className="text-slate-500 text-xs mt-1">ตัวเลขที่พนักงานจะเห็น</p>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-400 bg-slate-900/50 rounded-lg p-2">
+                ระบบจะยอมรับระยะ <span className="text-emerald-400 font-bold">{cur.maxDist||50} ม.</span> แต่แสดงว่าต้องอยู่ใน <span className="text-amber-400 font-bold">{cur.displayDist||20} ม.</span>
+              </div>
+            </div>
+
+            <button onClick={gps} className="w-full bg-slate-700 text-white font-bold py-2 rounded-lg hover:bg-slate-600 text-sm mb-4">
+              <IMapPin sz={13} cl="inline mr-1"/>ใช้ตำแหน่ง GPS ปัจจุบัน (แนะนำ: ยืนที่จุดลงทะเบียนแล้วกด)
+            </button>
+
+            {/* ตั้งค่าเวลาลงทะเบียน */}
+            <div className="bg-slate-800/60 border border-slate-600 rounded-xl p-4 mb-3">
+              <label className="block text-white font-bold text-sm mb-3">⏰ ช่วงเวลาที่ลงทะเบียนได้ — {cur.name}</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">เวลาเริ่มต้น</label>
+                  <input type="time"
+                    value={cur.timeStart||"08:00"}
+                    onChange={e=>setLocs(prev=>({...prev,[sel]:{...prev[sel],timeStart:e.target.value}}))}
+                    className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold mb-1">เวลาสิ้นสุด</label>
+                  <input type="time"
+                    value={cur.timeEnd||"09:30"}
+                    onChange={e=>setLocs(prev=>({...prev,[sel]:{...prev[sel],timeEnd:e.target.value}}))}
+                    className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg focus:border-emerald-500 focus:outline-none font-mono text-sm"/>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-400 bg-slate-900/50 rounded-lg p-2">
+                พนักงานลงทะเบียนได้ <span className="text-emerald-400 font-bold">{cur.timeStart||"08:00"} — {cur.timeEnd||"09:30"} น.</span>
+              </div>
+            </div>
+            <button onClick={save} disabled={saving} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-900 font-black py-3 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50 disabled:opacity-70 flex items-center justify-center">
+              {saving?<><ISpin sz={16} cl="mr-2"/>กำลังบันทึกไป Firestore...</>:saved?<><ICheck sz={16} cl="inline mr-2"/>บันทึกสำเร็จ! ☁️</>:"บันทึกการตั้งค่า (บันทึกออนไลน์)"}
+            </button>
+          </div>
+
+          {/* QR Code URLs */}
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6 shadow-xl">
+            <h3 className="text-white font-bold mb-1 flex items-center"><IQr sz={18} cl="text-amber-400 mr-2"/>URL สำหรับสร้าง QR Code (แต่ละหน่วยงาน)</h3>
+            <p className="text-slate-400 text-xs mb-4">นำ URL ไปสร้าง QR Code ที่ qrcode.me หรือ qr-code-generator.com</p>
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {Object.values(locs).map(l=>(
+                <div key={l.id} className="bg-slate-900/60 rounded-lg p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-emerald-400 font-bold text-xs">{l.name}</p>
+                    <p className="text-slate-400 font-mono text-xs truncate">{base}?location={l.id}</p>
+                  </div>
+                  <button onClick={()=>copyUrl(`${base}?location=${l.id}`)}
+                    className="flex-shrink-0 bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-600">
+                    คัดลอก
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 p-3 bg-slate-800/50 rounded-lg">
+              <p className="text-amber-400 font-bold text-xs mb-1">🔐 URL สำหรับ Admin</p>
+              <p className="text-slate-400 font-mono text-xs truncate">{base}?admin=1</p>
+              <button onClick={()=>copyUrl(`${base}?admin=1`)}
+                className="mt-2 bg-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-slate-600">
+                คัดลอก URL Admin
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
